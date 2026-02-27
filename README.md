@@ -1,467 +1,131 @@
-# NFC Event Management System
+# NFC Event Manager (V2)
 
-A complete NFC-based event management system for tracking food and goodie distribution at events. Participants tap their NFC tags at distribution counters, and the system instantly verifies identity, prevents duplicate collections, and provides real-time visual feedback.
-
----
+A robust, cross-platform NFC event management system designed to track attendee distribution logic (Registration, Meals, Snacks) across a multi-day event. Built with a Django backend and a Flutter frontend.
 
 ## Table of Contents
-
-- [Architecture Overview](#architecture-overview)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Complete Mobile → Backend Flow](#complete-mobile--backend-flow)
-- [API Reference](#api-reference)
-- [Step-by-Step Setup Guide](#step-by-step-setup-guide)
-- [Testing the Full Flow](#testing-the-full-flow)
-- [Security Features](#security-features)
-- [Production Deployment](#production-deployment)
+- [App Flow & Architecture](#app-flow--architecture)
+- [Backend Structure](#backend-structure)
+- [Frontend Structure](#frontend-structure)
+- [Time-Based Distribution Logic](#time-based-distribution-logic)
+- [Setup & Deployment](#setup--deployment)
 
 ---
 
-## Architecture Overview
+## App Flow & Architecture
 
-```
-┌────────────────────┐         HTTP/JSON          ┌────────────────────┐
-│                    │  ◄──────────────────────►   │                    │
-│   Flutter Mobile   │    Token Auth (Header)      │   Django Backend   │
-│   App (Android)    │                             │   (DRF + SQLite)   │
-│                    │                             │                    │
-│  • NFC Tag Reader  │   POST /api/login/          │  • Auth System     │
-│  • Login Screen    │   POST /api/scan/           │  • Participant DB  │
-│  • Scan Screen     │   POST /api/give-breakfast/ │  • Race-Safe Dist  │
-│  • Result Overlay  │   POST /api/give-lunch/     │  • Admin Dashboard │
-│                    │   POST /api/give-dinner/    │                    │
-│                    │   POST /api/give-goodie/    │                    │
-│                    │   GET  /api/stats/          │                    │
-└────────────────────┘                             └────────────────────┘
-```
+The application workflow bridges a physical NFC tag scan on a mobile device to a secured database transaction on a local or cloud server.
 
----
+### 1. Initialization & Configuration
+When the Administrator opens the mobile app, the `AppInitializer` checks `SharedPreferences` for an existing authentication token.
+- **Unauthenticated**: The user is routed to the Login Screen.
+- **Server Configuration**: The system defaults to `http://10.0.2.2:8000/api` (Android emulator localhost). If connecting via Mobile Hotspot or a Cloud Domain, the user taps the settings gear icon to update the **Server URL** (e.g., `http://192.168.1.100:8000/api`).
+- **Event Timing Configuration**: Under the Server URL input, the admin designates the **Event Start Date (Day 1)** using a native Date Picker. This instantly recalculates all backend interaction windows locking or unlocking specific meals.
 
-## Tech Stack
+### 2. Administrator Login
+- The admin inputs their credentials (`admin` / `admin123`).
+- A `POST` payload is fired to Django's `/api/login/` endpoint.
+- Django validates the user, issues a unique Auth Token, and returns `{ status: 'success', token: '...' }`.
+- The Mobile App securely caches this token and navigates to the **Scan Screen**.
 
-| Component | Technology |
-|-----------|-----------|
-| **Backend** | Python 3.10+, Django 4.x, Django REST Framework |
-| **Database** | SQLite (dev) / PostgreSQL (production) |
-| **Mobile App** | Flutter 3.x, Dart |
-| **NFC Library** | `nfc_manager` (Flutter) |
-| **Authentication** | DRF Token Authentication |
-| **Race Safety** | `transaction.atomic()` + `select_for_update()` |
+### 3. NFC Tag Scanning & Discovery
+- The device initializes the NFC hardware. A pulsing glowing green logo indicates readiness.
+- An attendee taps their smart-card or NFC wristband to the administrator's device.
+- The `nfc_manager` intercepts the hardware payload, attempting to read standard identifiers (NFCA, MIFARE, ISO-DEP, NFCV).
+- The raw byte array is parsed into a standardized Uppercase Hexadecimal `UID` (e.g., `04A23B1C5D6E80`).
 
----
+### 4. Participant Validation
+- The Mobile App fires a `POST /api/scan/` payload with the `uid` parameter to the Django server.
+- The Backend queries `Participant.objects.get(uid=uid)`.
+- If a match is found, Django serializes all biographical data (Name, College) alongside 6 distinct Booleans and Timestamps for each distribution slot (Registration, Breakfast, Lunch, Snacks, Dinner, Midnight Snacks).
+- The App parses the data into the local `Participant` data model and redraws the UI.
 
-## Project Structure
+### 5. Dynamic Time-Based UI (Chronological Matrix)
+The app calculates exactly what the administrator *should* be doing at that very second.
+- The `TimeManager` maps the 6 distribution slots against the current clock time relative to the chosen **Event Start Date**.
+- The UI builds 6 chronological cards, intelligently sorted:
+  1. **AVAILABLE NOW** (Top of list, bright green border, glowing pulse, active collect button)
+  2. **LOCKED** (Below available items, greyscaled, explicit countdown string like `Opens in 14h 22m`)
+  3. **COLLECTED** (Bottom half, muted dark green, stamped with exact collection timestamp)
+  4. **EXPIRED** (Absolute bottom, strike-through text, opacity reduced)
+- A dynamic segment bar instantly visualizes progress (e.g., `2 of 6 items collected`).
 
-```
-nfc/
-├── README.md                  ← You are here
-├── SETUP.md                   ← Detailed setup instructions
-├── DEPLOYMENT.md              ← Production deployment guide
-├── API_TESTS.md               ← curl/PowerShell API examples
-│
-├── backend/                   ← Django REST API
-│   ├── manage.py
-│   ├── requirements.txt
-│   ├── db.sqlite3             ← Created after migration
-│   ├── nfc_backend/
-│   │   ├── settings.py        ← Django config (DB, CORS, DRF)
-│   │   ├── urls.py            ← Root URL routing → events.urls
-│   │   └── wsgi.py            ← WSGI entry point
-│   └── events/
-│       ├── models.py          ← Participant model
-│       ├── views.py           ← 7 API endpoint handlers
-│       ├── serializers.py     ← Request/response validation
-│       ├── urls.py            ← API route definitions
-│       ├── admin.py           ← Django admin config
-│       ├── tests.py           ← 13 unit tests
-│       └── management/
-│           └── commands/
-│               └── seed_data.py  ← Sample data generator
-│
-└── mobile/                    ← Flutter Android App
-    ├── pubspec.yaml           ← Dependencies
-    ├── lib/
-    │   ├── main.dart          ← App entry, theme, auto-login
-    │   ├── api_service.dart   ← HTTP client + token management
-    │   ├── models.dart        ← Participant & DistributionResponse
-    │   ├── login_screen.dart  ← Admin login UI
-    │   ├── scan_screen.dart   ← NFC scanning + distribution UI
-    │   └── result_screen.dart ← Success/error overlay
-    └── android/
-        └── app/src/main/
-            └── AndroidManifest.xml  ← NFC permissions + intents
-```
+### 6. Atomic Food Distribution
+- The administrator taps **"Collect Lunch"**.
+- A `POST /api/give-lunch/` request is fired containing the `UID`.
+- **CRITICAL**: The backend wraps this query in a `transaction.atomic()` block and queries `Participant.objects.select_for_update()`. This literally locks the SQL row natively in the database.
+- The server checks if the user has already collected Lunch. If so, it rejects the request instantly (preventing duplicate food given out by two simultaneous admins).
+- If clear, it sets `lunch = True`, injects `timezone.now()` into `lunch_time`, saves the model, releases the lock, and returns a success payload.
+- The Flutter app triggers an aggressive Haptic Feedback vibration and a Top-Anchor green Toast notification dropping from the roof of the screen, confirming success and updating the UI card to **✓ COLLECTED**.
 
 ---
 
-## Complete Mobile → Backend Flow
+## Backend Structure
 
-This is the **end-to-end journey** from app launch to food distribution:
+Built using **Django 5.0** and **Django REST Framework (DRF)**.
 
-### Step 1: App Launch & Auto-Login Check
+**Models (`events/models.py`)**
+- `Participant`: The core entity.
+  - Characteristics: `uid` (Unique Hex String), `name`, `college`.
+  - States (Booleans): `registration_goodies`, `breakfast`, `lunch`, `snacks`, `dinner`, `midnight_snacks`.
+  - Timestamps (DateTimeFields): Corresponding tracking variables for exact collection times.
 
-```
-App starts → main.dart → NfcEventApp → AppInitializer
-                                            │
-                                    loadToken() from
-                                    SharedPreferences
-                                            │
-                               ┌────────────┴────────────┐
-                               │                         │
-                         Token exists?              No token?
-                               │                         │
-                        → ScanScreen              → LoginScreen
-```
-
-- `AppInitializer` checks SharedPreferences for a saved auth token
-- If found, skips login and goes directly to `ScanScreen`
-- If not found, shows `LoginScreen`
-
-### Step 2: Admin Login
-
-```
-LoginScreen                          Django Backend
-    │                                     │
-    │  POST /api/login/                   │
-    │  {"username":"admin",               │
-    │   "password":"admin123"}            │
-    │ ──────────────────────────────────► │
-    │                                     │  authenticate()
-    │                                     │  Token.objects.get_or_create()
-    │  {"status":"success",               │
-    │   "token":"abc123def...",           │
-    │   "username":"admin"}              │
-    │ ◄────────────────────────────────── │
-    │                                     │
-    │  Save token → SharedPreferences     │
-    │  Navigate → ScanScreen              │
-```
-
-- User enters username + password (and optionally configures server URL)
-- `ApiService.login()` sends POST to `/api/login/`
-- Backend authenticates via `django.contrib.auth.authenticate()`
-- On success: returns a DRF `Token`, saved to `SharedPreferences`
-- On failure: returns 401 with error message
-
-### Step 3: NFC Tag Scan
-
-```
-Physical NFC Tag              Flutter App                    Django Backend
-      │                           │                               │
-  [TAP TAG]                       │                               │
-      │                   NfcManager detects tag                  │
-      │                   onDiscovered callback                   │
-      │                           │                               │
-      │                   Extract UID bytes from                  │
-      │                   nfca/nfcb/mifare/isodep                 │
-      │                           │                               │
-      │                   Convert to uppercase hex                │
-      │                   e.g. "04A23B1C5D6E80"                   │
-      │                           │                               │
-      │                   POST /api/scan/                         │
-      │                   Authorization: Token abc123             │
-      │                   {"uid":"04A23B1C5D6E80"}                │
-      │                   ─────────────────────────────────────► │
-      │                                                           │
-      │                                              Normalize UID (uppercase)
-      │                                              Participant.objects.get()
-      │                                                           │
-      │                   {"status":"valid",                      │
-      │                    "name":"Rahul Kumar",                  │
-      │                    "college":"IIT Madras",                │
-      │                    "breakfast": false,                    │
-      │                    "lunch": false,                        │
-      │                    "dinner": false,                       │
-      │                    "goodie_collected": false}             │
-      │                   ◄───────────────────────────────────── │
-      │                           │                               │
-      │                   Display participant card                │
-      │                   Show 4 action buttons                   │
-```
-
-**UID Extraction Logic** (handles all NFC tag types):
-1. Try `nfca['identifier']` (most common — MIFARE Ultralight/Classic)
-2. Try `mifare['identifier']`
-3. Try `nfcb['identifier']`
-4. Try `nfcf['identifier']` (FeliCa)
-5. Try `nfcv['identifier']` (ISO 15693)
-6. Try `isodep['identifier']`
-
-**UID Format**: Raw bytes → uppercase hex string, no separators  
-Example: `[0x04, 0xA2, 0x3B, 0x1C, 0x5D, 0x6E, 0x80]` → `"04A23B1C5D6E80"`
-
-### Step 4: Food/Goodie Distribution
-
-```
-Flutter App                                        Django Backend
-    │                                                    │
-    │  User taps "Give Breakfast" button                 │
-    │                                                    │
-    │  POST /api/give-breakfast/                         │
-    │  Authorization: Token abc123                       │
-    │  {"uid":"04A23B1C5D6E80"}                          │
-    │  ───────────────────────────────────────────────► │
-    │                                                    │
-    │                                       transaction.atomic():
-    │                                         participant = Participant
-    │                                           .objects
-    │                                           .select_for_update()
-    │                                           .get(uid=uid)
-    │                                                    │
-    │                                       if participant.breakfast:
-    │                                         → already_collected
-    │                                       else:
-    │                                         participant.breakfast = True
-    │                                         participant.save()
-    │                                         → success
-    │                                                    │
-    │  ◄ FIRST TIME ─────────────────────────────────── │
-    │  {"status":"success",                              │
-    │   "message":"Breakfast given to Rahul Kumar.",      │
-    │   "name":"Rahul Kumar",                            │
-    │   "college":"IIT Madras"}                          │
-    │                                                    │
-    │  → Show GREEN overlay: "Allowed"                   │
-    │  → Refresh participant data                        │
-    │  → Button changes to "Breakfast ✓ Collected"       │
-    │  → Button gets disabled                            │
-    │                                                    │
-    │  ◄ SECOND TIME ────────────────────────────────── │
-    │  {"status":"already_collected",                    │
-    │   "message":"Breakfast already collected           │
-    │              by Rahul Kumar.",                      │
-    │   "name":"Rahul Kumar",                            │
-    │   "college":"IIT Madras"}                          │
-    │                                                    │
-    │  → Show RED overlay: "Already Collected"           │
-```
-
-**Race Condition Prevention**: If two counters scan the same tag simultaneously:
-- `select_for_update()` locks the database row
-- Second request waits until the first completes
-- Only one gets `"success"`, the other gets `"already_collected"`
-
-### Step 5: Visual Feedback (Result Overlay)
-
-| Status | Color | Icon | Auto-dismiss |
-|--------|-------|------|-------------|
-| **Success** | 🟢 Green gradient | ✓ Check circle | 2 seconds |
-| **Already Collected** | 🔴 Red gradient | ⊘ Block | 2 seconds |
-| **Invalid Tag** | 🟠 Orange gradient | ⚠ Error | 2 seconds |
-| **Error** | 🟣 Purple gradient | ⚠ Warning | 2 seconds |
-
-### Step 6: Scan Next Tag
-
-After distributing, the operator can:
-1. **Tap another NFC tag** → automatically scans the new tag (NFC session continues)
-2. **Press "Scan Another Tag"** → resets the UI to scan mode
-3. **Press refresh icon** → clears current participant and waits for new tag
+**Endpoints (`events/views.py`)**
+- `/api/login/`: Auth token generation.
+- `/api/scan/`: Retreives participant state natively.
+- `/api/give-X/`: 6 isolated endpoints orchestrating atomic SQL writes for the specific physical item (`give-registration`, `give-lunch`, etc.).
+- `/api/stats/`: Returns comprehensive analytical dashboard numbers (Total registered, total meals served).
 
 ---
 
-## API Reference
+## Frontend Structure
 
-All endpoints require `Authorization: Token <token>` header except `/api/login/`.
+Built using **Flutter 3+** executing the **Black & Green** Modern Aesthetic (`#00E676` primary green, `#1C1C1C` dark layouts).
 
-| Method | Endpoint | Body | Auth | Description |
-|--------|----------|------|------|-------------|
-| POST | `/api/login/` | `{"username", "password"}` | No | Get auth token |
-| POST | `/api/scan/` | `{"uid": "HEX"}` | Yes | Lookup participant |
-| POST | `/api/give-breakfast/` | `{"uid": "HEX"}` | Yes | Mark breakfast collected |
-| POST | `/api/give-lunch/` | `{"uid": "HEX"}` | Yes | Mark lunch collected |
-| POST | `/api/give-dinner/` | `{"uid": "HEX"}` | Yes | Mark dinner collected |
-| POST | `/api/give-goodie/` | `{"uid": "HEX"}` | Yes | Mark goodie collected |
-| GET | `/api/stats/` | — | Yes | Distribution statistics |
+**Core Files (`lib/`)**
+- `main.dart`: MaterialApp entry point, global layout theming, and `AppInitializer` routing.
+- `models.dart`: JSON-to-Dart translation objects (`Participant`, `DistributionResponse`).
+- `api_service.dart`: Rest HTTP client injected safely with `auth_token` standard headers.
+- `login_screen.dart`: Authentication boundary and Local Environment variable modifier (Server IP & Event Date).
+- `scan_screen.dart`: The core chronological UI, hardware scanner listener, Toast master, and Animation Controller manager.
+- `utils/time_manager.dart`: A sophisticated stateless utility determining exactly how the current timezone correlates against the exact offset specifications required for a 48-hour event window.
 
 ---
 
-## Step-by-Step Setup Guide
+## Time-Based Distribution Logic
 
-### Prerequisites
+The application natively accounts for Day 1 and Day 2 transitions, leveraging 5-minute leeway grace boundaries.
 
-- Python 3.10+
-- Flutter SDK 3.0+
-- Android device with NFC (or emulator for testing without NFC)
+*Relative to "Event Start Date"*
+* **Registration & Goodies**: Day 1 | `08:00 AM - 12:00 PM`
+* **Lunch**: Day 1 | `12:30 PM - 04:00 PM`
+* **Evening Snacks**: Day 1 | `04:30 PM - 07:00 PM`
+* **Dinner**: Day 1 | `08:00 PM - 11:00 PM`
+* **Midnight Snacks**: Day 2 | `12:00 AM - 02:00 AM`
+* **Breakfast**: Day 2 | `07:30 AM - 10:30 AM`
 
-### 1. Start the Backend
+*Note: The Flutter UI determines these thresholds dynamically, but the physical backend Django Database will manually accept distribution POSTs at any time from an authenticated admin token. Time enforcement is handled organically at the UX level.*
 
+---
+
+## Setup & Deployment
+
+### Backend (Django)
 ```bash
 cd backend
-
-# Create virtual environment
 python -m venv venv
-
-# Activate (Windows)
 .\venv\Scripts\activate
-
-# Activate (macOS/Linux)
-source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Create database tables
-python manage.py makemigrations events
 python manage.py migrate
-
-# Seed sample data (creates users + 20 participants)
-python manage.py seed_data
-
-# Start server (accessible from mobile device)
+python manage.py seed_data --count 20
 python manage.py runserver 0.0.0.0:8000
 ```
+*Note: Make sure your Windows Defender firewall allows ingress traffic to Port 8000 to enable Hotspot LAN scanning.*
 
-**Note the output from `seed_data`** — it prints:
-- Admin credentials: `admin` / `admin123`
-- Counter credentials: `counter1` / `counter123`
-- Auth tokens for both users
-- Sample NFC UIDs for testing
-
-### 2. Configure & Run the Mobile App
-
+### Frontend (Flutter)
 ```bash
 cd mobile
-
-# Install Flutter dependencies
+flutter clean
 flutter pub get
-
-# Run on connected Android device
 flutter run
 ```
-
-### 3. Connect App to Backend
-
-On the **Login Screen**, tap **"Server Config"** and set the URL:
-
-| Scenario | Server URL |
-|----------|-----------|
-| Android Emulator → host PC | `http://10.0.2.2:8000/api` |
-| Physical device → same WiFi | `http://<your-pc-ip>:8000/api` |
-| Production server | `https://yourdomain.com/api` |
-
-To find your PC's IP:
-```bash
-# Windows
-ipconfig
-
-# macOS/Linux
-ifconfig
-```
-
-### 4. Login
-
-Enter `admin` / `admin123` (or `counter1` / `counter123`) and tap **Sign In**.
-
-### 5. Start Scanning
-
-- **With NFC tags**: Simply hold a registered NFC tag near the device
-- **Without NFC tags**: Tap **"Enter UID manually"** and type a sample UID from the seed output
-
----
-
-## Testing the Full Flow
-
-### Quick Smoke Test (No NFC Hardware Needed)
-
-1. Start backend: `python manage.py runserver 0.0.0.0:8000`
-2. Run Flutter app: `flutter run`
-3. Login with `admin` / `admin123`
-4. Tap **"Enter UID manually"**
-5. Enter a sample UID from the seed data output
-6. You should see the participant's name and college
-7. Tap **"Give Breakfast"** → Green overlay ✓
-8. Tap **"Give Breakfast"** again → Red overlay (already collected)
-9. Tap **"Give Lunch"** → Green overlay ✓
-10. Tap **"Scan Another Tag"** → Ready for next participant
-
-### Run Backend Unit Tests
-
-```bash
-cd backend
-.\venv\Scripts\python.exe manage.py test events -v 2
-```
-
-Expected: **13 tests, all passing**
-
-### Run Flutter Static Analysis
-
-```bash
-cd mobile
-flutter analyze
-```
-
-Expected: **No issues found**
-
-### API Test with curl
-
-```bash
-# Login
-curl -X POST http://localhost:8000/api/login/ \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin123"}'
-
-# Scan (use token from login response)
-curl -X POST http://localhost:8000/api/scan/ \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Token YOUR_TOKEN" \
-  -d '{"uid": "SAMPLE_UID_FROM_SEED"}'
-
-# Distribute
-curl -X POST http://localhost:8000/api/give-breakfast/ \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Token YOUR_TOKEN" \
-  -d '{"uid": "SAMPLE_UID_FROM_SEED"}'
-```
-
-See [API_TESTS.md](API_TESTS.md) for more examples.
-
----
-
-## Security Features
-
-| Feature | Implementation |
-|---------|---------------|
-| **Authentication** | DRF Token Auth on all endpoints (except login) |
-| **Race Conditions** | `select_for_update()` + `transaction.atomic()` |
-| **UID Normalization** | Uppercase hex, strip colons/hyphens on both ends |
-| **CORS** | Open in dev (`DEBUG=True`), restricted in production |
-| **Cleartext HTTP** | Enabled for development only; use HTTPS in production |
-
----
-
-## Production Deployment
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for full instructions covering:
-- PostgreSQL database setup
-- Gunicorn + Nginx configuration
-- HTTPS with Let's Encrypt
-- Systemd service for auto-restart
-- Building release APK
-
----
-
-## Database Model
-
-```
-Participant
-├── uid: CharField(32, unique, indexed)   ← NFC tag hardware UID
-├── name: CharField(200)                  ← Participant name
-├── college: CharField(200)               ← College/institution
-├── breakfast: BooleanField (default: False)
-├── lunch: BooleanField (default: False)
-├── dinner: BooleanField (default: False)
-├── goodie_collected: BooleanField (default: False)
-└── created_at: DateTimeField (auto)
-```
-
----
-
-## Default Credentials
-
-| User | Password | Role | Use Case |
-|------|----------|------|----------|
-| `admin` | `admin123` | Superuser | Django admin panel + API |
-| `counter1` | `counter123` | Staff | Distribution counters |
-
-> ⚠️ **Change these credentials before deploying to production!**
+*Note: The NFC capability must be manually triggered on iOS within Xcode permissions, while Android merely requires standard `AndroidManifest.xml` hardware permissions.*

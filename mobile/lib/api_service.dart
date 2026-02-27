@@ -104,17 +104,23 @@ class ApiService {
     }
   }
 
+  Future<DistributionResponse> giveRegistration(String uid) =>
+      _distribute('give-registration', uid);
+
   Future<DistributionResponse> giveBreakfast(String uid) =>
       _distribute('give-breakfast', uid);
 
   Future<DistributionResponse> giveLunch(String uid) =>
       _distribute('give-lunch', uid);
 
+  Future<DistributionResponse> giveSnacks(String uid) =>
+      _distribute('give-snacks', uid);
+
   Future<DistributionResponse> giveDinner(String uid) =>
       _distribute('give-dinner', uid);
 
-  Future<DistributionResponse> giveGoodie(String uid) =>
-      _distribute('give-goodie', uid);
+  Future<DistributionResponse> giveMidnightSnacks(String uid) =>
+      _distribute('give-midnight-snacks', uid);
 
   /// Update base URL (for settings screen).
   static void setBaseUrl(String url) {

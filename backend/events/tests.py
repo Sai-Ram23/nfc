@@ -28,7 +28,7 @@ class ScanAPITest(TestCase):
         self.assertEqual(response.data['status'], 'valid')
         self.assertEqual(response.data['name'], 'Rahul Kumar')
         self.assertEqual(response.data['college'], 'IIT Madras')
-        self.assertFalse(response.data['breakfast'])
+        self.assertFalse(response.data['registration_goodies'])
 
     def test_scan_invalid_uid(self):
         response = self.client.post('/api/scan/', {'uid': 'INVALID000000'})
@@ -64,24 +64,32 @@ class DistributionAPITest(TestCase):
             college='IIT Madras',
         )
 
+    def test_give_registration_success(self):
+        response = self.client.post(
+            '/api/give-registration/', {'uid': '04A23B1C5D6E80'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.participant.refresh_from_db()
+        self.assertTrue(self.participant.registration_goodies)
+
+    def test_give_registration_duplicate(self):
+        self.participant.registration_goodies = True
+        self.participant.save()
+        response = self.client.post(
+            '/api/give-registration/', {'uid': '04A23B1C5D6E80'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'already_collected')
+
     def test_give_breakfast_success(self):
         response = self.client.post(
             '/api/give-breakfast/', {'uid': '04A23B1C5D6E80'}
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'success')
-        # Verify database updated
         self.participant.refresh_from_db()
         self.assertTrue(self.participant.breakfast)
-
-    def test_give_breakfast_duplicate(self):
-        self.participant.breakfast = True
-        self.participant.save()
-        response = self.client.post(
-            '/api/give-breakfast/', {'uid': '04A23B1C5D6E80'}
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['status'], 'already_collected')
 
     def test_give_lunch_success(self):
         response = self.client.post(
@@ -92,6 +100,15 @@ class DistributionAPITest(TestCase):
         self.participant.refresh_from_db()
         self.assertTrue(self.participant.lunch)
 
+    def test_give_snacks_success(self):
+        response = self.client.post(
+            '/api/give-snacks/', {'uid': '04A23B1C5D6E80'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.participant.refresh_from_db()
+        self.assertTrue(self.participant.snacks)
+
     def test_give_dinner_success(self):
         response = self.client.post(
             '/api/give-dinner/', {'uid': '04A23B1C5D6E80'}
@@ -101,23 +118,14 @@ class DistributionAPITest(TestCase):
         self.participant.refresh_from_db()
         self.assertTrue(self.participant.dinner)
 
-    def test_give_goodie_success(self):
+    def test_give_midnight_snacks_success(self):
         response = self.client.post(
-            '/api/give-goodie/', {'uid': '04A23B1C5D6E80'}
+            '/api/give-midnight-snacks/', {'uid': '04A23B1C5D6E80'}
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'success')
         self.participant.refresh_from_db()
-        self.assertTrue(self.participant.goodie_collected)
-
-    def test_give_goodie_duplicate(self):
-        self.participant.goodie_collected = True
-        self.participant.save()
-        response = self.client.post(
-            '/api/give-goodie/', {'uid': '04A23B1C5D6E80'}
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['status'], 'already_collected')
+        self.assertTrue(self.participant.midnight_snacks)
 
     def test_distribute_invalid_uid(self):
         response = self.client.post(

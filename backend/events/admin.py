@@ -6,10 +6,19 @@ from .models import Participant
 class ParticipantAdmin(admin.ModelAdmin):
     list_display = [
         'uid', 'name', 'college',
-        'breakfast', 'lunch', 'dinner', 'goodie_collected',
+        'registration_goodies', 'breakfast', 'lunch', 
+        'snacks', 'dinner', 'midnight_snacks',
         'created_at',
     ]
-    list_filter = ['breakfast', 'lunch', 'dinner', 'goodie_collected', 'college']
+    list_filter = [
+        'registration_goodies', 'breakfast', 'lunch', 
+        'snacks', 'dinner', 'midnight_snacks', 
+        'college'
+    ]
     search_fields = ['uid', 'name', 'college']
-    readonly_fields = ['created_at']
+    readonly_fields = [
+        'registration_time', 'breakfast_time', 'lunch_time', 
+        'snacks_time', 'dinner_time', 'midnight_snacks_time', 
+        'created_at'
+    ]
     list_per_page = 50

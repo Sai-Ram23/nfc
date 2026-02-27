@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:intl/intl.dart';
 import 'package:nfc_manager/nfc_manager.dart';
+
 import 'api_service.dart';
 import 'models.dart';
-import 'result_screen.dart';
 import 'login_screen.dart';
+import 'utils/time_manager.dart';
 
 class ScanScreen extends StatefulWidget {
   final ApiService api;
@@ -16,30 +19,45 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   bool _nfcAvailable = false;
   bool _loading = false;
   String _statusMessage = 'Ready to Scan';
   Participant? _participant;
   String? _lastScannedUid;
+  
+  // Timers and Animation controllers
+  Timer? _minuteTimer;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
+  
+  // Store the exact time we fetched the participant to show "Last scanned"
+  DateTime? _lastFetchTime;
 
   @override
   void initState() {
     super.initState();
+    // Start pulse animation for Available items / NFC logo
     _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
+       vsync: this,
+       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+    
     _pulseAnim = Tween<double>(begin: 0.8, end: 1.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+
+    // Refresh time-based logic every minute
+    _minuteTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+
     _checkNfc();
   }
 
   @override
   void dispose() {
+    _minuteTimer?.cancel();
     _pulseController.dispose();
     NfcManager.instance.stopSession();
     super.dispose();
@@ -64,7 +82,6 @@ class _ScanScreenState extends State<ScanScreen>
 
     NfcManager.instance.startSession(
       onDiscovered: (NfcTag tag) async {
-        // Extract hardware UID from the tag
         final nfca = tag.data['nfca'];
         final nfcb = tag.data['nfcb'];
         final nfcf = tag.data['nfcf'];
@@ -74,7 +91,6 @@ class _ScanScreenState extends State<ScanScreen>
 
         List<int>? identifier;
 
-        // Try to get UID from various tag types
         if (nfca != null && nfca['identifier'] != null) {
           identifier = List<int>.from(nfca['identifier']);
         } else if (mifare != null && mifare['identifier'] != null) {
@@ -90,18 +106,18 @@ class _ScanScreenState extends State<ScanScreen>
         }
 
         if (identifier == null || identifier.isEmpty) {
-          setState(() {
-            _statusMessage = 'Could not read tag UID';
-          });
+          _showToast('Could not read tag UID', isError: true);
           return;
         }
 
-        // Convert to uppercase hex string without colons
         final uid = identifier
             .map((b) => b.toRadixString(16).padLeft(2, '0'))
             .join()
             .toUpperCase();
 
+        // Haptic feedback
+        HapticFeedback.lightImpact();
+        
         _lastScannedUid = uid;
         await _scanUid(uid);
       },
@@ -116,7 +132,7 @@ class _ScanScreenState extends State<ScanScreen>
   Future<void> _scanUid(String uid) async {
     setState(() {
       _loading = true;
-      _statusMessage = 'Looking up participant...';
+      _statusMessage = 'Syncing status...';
     });
 
     final result = await widget.api.scanUid(uid);
@@ -125,70 +141,73 @@ class _ScanScreenState extends State<ScanScreen>
 
     if (result['status'] == 'valid') {
       setState(() {
-        _participant = Participant(
-          uid: uid,
-          name: result['name'] ?? 'Unknown',
-          college: result['college'] ?? 'Unknown',
-          breakfast: result['breakfast'] ?? false,
-          lunch: result['lunch'] ?? false,
-          dinner: result['dinner'] ?? false,
-          goodieCollected: result['goodie_collected'] ?? false,
-        );
+        _participant = Participant.fromJson(result);
+        _lastFetchTime = DateTime.now();
         _statusMessage = 'Participant Found';
         _loading = false;
       });
-    } else if (result['status'] == 'invalid') {
-      setState(() {
-        _participant = null;
-        _statusMessage = 'Invalid NFC Tag';
-        _loading = false;
-      });
-      _showResult(ResultType.invalid, 'No participant linked to this tag');
+      HapticFeedback.mediumImpact();
     } else {
       setState(() {
         _participant = null;
-        _statusMessage = result['message'] ?? 'Error';
+        _statusMessage = result['status'] == 'invalid' 
+            ? 'Invalid NFC Tag' 
+            : (result['message'] ?? 'Error');
         _loading = false;
       });
-      _showResult(ResultType.error, result['message'] ?? 'Unknown error');
+      _showToast(result['message'] ?? 'No participant linked to this tag', isError: true);
+      HapticFeedback.heavyImpact();
     }
   }
 
-  Future<void> _giveItem(String label, Future<DistributionResponse> Function(String) action) async {
+  Future<void> _giveItem(DistributionSlot slot, Future<DistributionResponse> Function(String) action) async {
     if (_lastScannedUid == null) return;
+    HapticFeedback.selectionClick();
 
     setState(() => _loading = true);
-
     final response = await action(_lastScannedUid!);
-
     if (!mounted) return;
-
     setState(() => _loading = false);
 
     if (response.isSuccess) {
-      _showResult(ResultType.success, response.message);
-      // Refresh participant data
+      _showToast('✓ ${slot.title} collected successfully');
+      HapticFeedback.heavyImpact(); // Confirms success
       await _scanUid(_lastScannedUid!);
     } else if (response.isAlreadyCollected) {
-      _showResult(ResultType.duplicate, response.message);
+      _showToast(response.message, isError: true);
+      HapticFeedback.vibrate();
     } else {
-      _showResult(ResultType.error, response.message);
+      _showToast(response.message, isError: true);
     }
   }
 
-  void _showResult(ResultType type, String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => ResultOverlay(type: type, message: message),
+  void _showToast(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1C1C1C),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top + 10,
+          left: 16,
+          right: 16,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isError ? const Color(0xFFFF5252) : const Color(0xFF00E676),
+            width: 2,
+          ),
+        ),
+        dismissDirection: DismissDirection.up,
+        duration: const Duration(seconds: 3),
+      ),
     );
-
-    // Auto-dismiss after 2 seconds
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-    });
   }
 
   Future<void> _logout() async {
@@ -209,19 +228,30 @@ class _ScanScreenState extends State<ScanScreen>
     });
   }
 
+  // --- UI Builders ---
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NFC Event Manager'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
+        title: const Text(
+          'NFC Event Manager',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Export feature coming soon")),
+              );
+            },
+          ),
           if (_participant != null)
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: _resetScan,
-              tooltip: 'New Scan',
+              onPressed: () => _scanUid(_lastScannedUid!),
+              tooltip: 'Refresh Status',
             ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -232,7 +262,16 @@ class _ScanScreenState extends State<ScanScreen>
       ),
       body: SafeArea(
         child: _participant != null
-            ? _buildParticipantView()
+            ? RefreshIndicator(
+                color: const Color(0xFF00E676),
+                backgroundColor: const Color(0xFF1C1C1C),
+                onRefresh: () async {
+                  if (_lastScannedUid != null) {
+                    await _scanUid(_lastScannedUid!);
+                  }
+                },
+                child: _buildParticipantView(),
+              )
             : _buildScanView(),
       ),
     );
@@ -243,7 +282,6 @@ class _ScanScreenState extends State<ScanScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Animated NFC icon
           AnimatedBuilder(
             animation: _pulseAnim,
             builder: (context, child) {
@@ -255,12 +293,12 @@ class _ScanScreenState extends State<ScanScreen>
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        const Color(0xFF6C63FF).withValues(alpha: 0.3),
-                        const Color(0xFF6C63FF).withValues(alpha: 0.05),
+                        const Color(0xFF00E676).withValues(alpha: 0.3),
+                        const Color(0xFF00E676).withValues(alpha: 0.05),
                       ],
                     ),
                     border: Border.all(
-                      color: const Color(0xFF6C63FF).withValues(alpha: 0.5),
+                      color: const Color(0xFF00E676).withValues(alpha: 0.5),
                       width: 2,
                     ),
                   ),
@@ -268,7 +306,7 @@ class _ScanScreenState extends State<ScanScreen>
                     _nfcAvailable ? Icons.nfc_rounded : Icons.nfc_outlined,
                     size: 80,
                     color: _nfcAvailable
-                        ? const Color(0xFF6C63FF)
+                        ? const Color(0xFF00E676)
                         : Colors.grey,
                   ),
                 ),
@@ -276,19 +314,17 @@ class _ScanScreenState extends State<ScanScreen>
             },
           ),
           const SizedBox(height: 32),
-
-          // Status text
           if (_loading)
-            const CircularProgressIndicator()
+            const CircularProgressIndicator(color: Color(0xFF00E676))
           else
             Text(
               _statusMessage,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: _nfcAvailable ? Colors.white : Colors.grey,
+                    fontWeight: FontWeight.w600,
                   ),
               textAlign: TextAlign.center,
             ),
-
           if (!_nfcAvailable) ...[
             const SizedBox(height: 16),
             const Text(
@@ -296,13 +332,11 @@ class _ScanScreenState extends State<ScanScreen>
               style: TextStyle(color: Colors.white38),
             ),
           ],
-
-          // Manual UID entry for testing
           const SizedBox(height: 48),
           TextButton.icon(
-            onPressed: () => _showManualEntry(),
-            icon: const Icon(Icons.keyboard, size: 18),
-            label: const Text('Enter UID manually'),
+            onPressed: _showManualEntry,
+            icon: const Icon(Icons.keyboard, size: 18, color: Color(0xFF00E676)),
+            label: const Text('Enter UID manually', style: TextStyle(color: Color(0xFF00E676))),
           ),
         ],
       ),
@@ -314,14 +348,24 @@ class _ScanScreenState extends State<ScanScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A3E),
-        title: const Text('Enter NFC UID'),
+        backgroundColor: const Color(0xFF1C1C1C),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E2E))),
+        title: const Text('Enter NFC UID', style: TextStyle(color: Colors.white)),
         content: TextField(
           controller: controller,
+          style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
             hintText: 'e.g. 04A23B1C5D6E80',
-            border: OutlineInputBorder(
+            hintStyle: const TextStyle(color: Colors.white30),
+            enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF2E2E2E)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF00E676)),
             ),
           ),
           textCapitalization: TextCapitalization.characters,
@@ -329,7 +373,7 @@ class _ScanScreenState extends State<ScanScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -347,233 +391,379 @@ class _ScanScreenState extends State<ScanScreen>
     );
   }
 
+  // Helper to map a Slot to the Participant's boolean status and timestamp
+  Map<String, dynamic> _getParticipantDataForSlot(DistributionSlot slot) {
+    final p = _participant!;
+    switch (slot.id) {
+      case 'registration_goodies':
+        return {'collected': p.registrationGoodies, 'time': p.registrationTime, 'action': widget.api.giveRegistration};
+      case 'breakfast':
+        return {'collected': p.breakfast, 'time': p.breakfastTime, 'action': widget.api.giveBreakfast};
+      case 'lunch':
+        return {'collected': p.lunch, 'time': p.lunchTime, 'action': widget.api.giveLunch};
+      case 'snacks':
+        return {'collected': p.snacks, 'time': p.snacksTime, 'action': widget.api.giveSnacks};
+      case 'dinner':
+        return {'collected': p.dinner, 'time': p.dinnerTime, 'action': widget.api.giveDinner};
+      case 'midnight_snacks':
+        return {'collected': p.midnightSnacks, 'time': p.midnightSnacksTime, 'action': widget.api.giveMidnightSnacks};
+      default:
+        return {'collected': false, 'time': null, 'action': (_) async => DistributionResponse(status: 'error', message: 'Unknown')};
+    }
+  }
+
   Widget _buildParticipantView() {
     final p = _participant!;
+    final timeFormat = DateFormat('h:mm a');
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          // Participant Info Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
+    // Build list of slots with their states for sorting and progress bar
+    int collectedCount = 0;
+    List<Map<String, dynamic>> slotData = [];
+
+    for (var slot in TimeManager.slots) {
+      final pData = _getParticipantDataForSlot(slot);
+      final isCollected = pData['collected'] as bool;
+      if (isCollected) collectedCount++;
+
+      final state = timeManager.getSlotState(slot, isCollected);
+      int sortWeight;
+      switch (state) {
+        case SlotState.available: sortWeight = 0; break;
+        case SlotState.locked: sortWeight = 1; break;
+        case SlotState.collected: sortWeight = 2; break;
+        case SlotState.expired: sortWeight = 3; break;
+      }
+
+      slotData.add({
+        'slot': slot,
+        'state': state,
+        'pData': pData,
+        'sortWeight': sortWeight,
+        'startTime': timeManager.getSlotStartTime(slot) // secondary sort
+      });
+    }
+
+    // Sort slots logically
+    slotData.sort((a, b) {
+      if (a['sortWeight'] != b['sortWeight']) {
+        return a['sortWeight'].compareTo(b['sortWeight']);
+      }
+      return (a['startTime'] as DateTime).compareTo(b['startTime'] as DateTime);
+    });
+
+    final bool allExpiredOrCollected = slotData.every((s) => s['state'] == SlotState.expired || s['state'] == SlotState.collected);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        // 1. User Profile Card
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C1C),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF00E676).withValues(alpha: 0.3), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF00E676).withValues(alpha: 0.05),
+                blurRadius: 20,
+              )
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Avatar
                   CircleAvatar(
-                    radius: 36,
-                    backgroundColor: const Color(0xFF6C63FF),
+                    radius: 30,
+                    backgroundColor: const Color(0xFF00E676).withValues(alpha: 0.1),
                     child: Text(
-                      p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                      p.name == 'Unknown' ? '?' : p.name[0].toUpperCase(),
                       style: const TextStyle(
-                        fontSize: 32,
+                        fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: Color(0xFF00E676),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // Name
-                  Text(
-                    p.name,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          p.name == 'Unknown' ? 'Guest Attendee' : p.name,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
-                  ),
-                  const SizedBox(height: 4),
-
-                  // College
-                  Text(
-                    p.college,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Colors.white60,
+                        const SizedBox(height: 4),
+                        Text(
+                          p.college,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFFB0B0B0),
+                          ),
                         ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
-
-                  // UID Badge
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6C63FF).withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
+                      color: const Color(0xFF1B5E20),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      'UID: ${p.uid}',
-                      style: const TextStyle(
-                        color: Color(0xFF9D97FF),
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
+                      p.uid,
+                      style: const TextStyle(fontSize: 12, color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.w600),
                     ),
                   ),
+                  if (_lastFetchTime != null)
+                    Text(
+                      'Last scanned: ${timeFormat.format(_lastFetchTime!)}',
+                      style: const TextStyle(fontSize: 10, color: Color(0xFFB0B0B0)),
+                    ),
                 ],
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 16),
+        ),
 
-          // Distribution Status Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Distribution Status',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w600,
-                        ),
+        const SizedBox(height: 20),
+
+        // 2. Progress Indicator
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$collectedCount of 6 items collected',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: List.generate(6, (index) {
+                final isFilled = index < collectedCount;
+                return Expanded(
+                  child: Container(
+                    height: 6,
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(
+                      color: isFilled ? const Color(0xFF00E676) : const Color(0xFF2E2E2E),
+                      borderRadius: BorderRadius.circular(3),
+                      boxShadow: isFilled
+                          ? [const BoxShadow(color: Color(0xFF00E676), blurRadius: 4)]
+                          : null,
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  _statusRow('Breakfast', p.breakfast, Icons.free_breakfast),
-                  _statusRow('Lunch', p.lunch, Icons.lunch_dining),
-                  _statusRow('Dinner', p.dinner, Icons.dinner_dining),
-                  _statusRow('Goodie', p.goodieCollected, Icons.card_giftcard),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Action Buttons
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else ...[
-            _buildActionButton(
-              'Give Breakfast',
-              Icons.free_breakfast,
-              p.breakfast,
-              const Color(0xFFF59E0B),
-              () => _giveItem('Breakfast', widget.api.giveBreakfast),
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              'Give Lunch',
-              Icons.lunch_dining,
-              p.lunch,
-              const Color(0xFF10B981),
-              () => _giveItem('Lunch', widget.api.giveLunch),
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              'Give Dinner',
-              Icons.dinner_dining,
-              p.dinner,
-              const Color(0xFF3B82F6),
-              () => _giveItem('Dinner', widget.api.giveDinner),
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              'Give Goodie',
-              Icons.card_giftcard,
-              p.goodieCollected,
-              const Color(0xFFEC4899),
-              () => _giveItem('Goodie', widget.api.giveGoodie),
+                );
+              }),
             ),
           ],
+        ),
 
-          const SizedBox(height: 24),
+        const SizedBox(height: 24),
+        
+        // Scan another button
+        OutlinedButton.icon(
+          onPressed: _resetScan,
+          icon: const Icon(Icons.nfc, color: Colors.white),
+          label: const Text('Scan Another Tag', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: Color(0xFF2E2E2E)),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
 
-          // Scan another button
-          OutlinedButton.icon(
-            onPressed: _resetScan,
-            icon: const Icon(Icons.nfc),
-            label: const Text('Scan Another Tag'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+        const SizedBox(height: 24),
+
+        // 3. Items List
+        if (allExpiredOrCollected)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: Column(
+                children: [
+                  const Icon(Icons.event_available, color: Color(0xFF00E676), size: 48),
+                  const SizedBox(height: 12),
+                  const Text('Event Completed', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('You collected $collectedCount of 6 items', style: const TextStyle(color: Color(0xFFB0B0B0))),
+                  const SizedBox(height: 48), // Padding before end of scroll
+                ],
               ),
             ),
-          ),
-        ],
-      ),
+          )
+        else
+          ...slotData.map((data) => _buildSlotCard(data)),
+      ],
     );
   }
 
-  Widget _statusRow(String label, bool collected, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+  Widget _buildSlotCard(Map<String, dynamic> data) {
+    final slot = data['slot'] as DistributionSlot;
+    final state = data['state'] as SlotState;
+    final pData = data['pData'] as Map<String, dynamic>;
+    final collectedTime = pData['time'] as DateTime?;
+    
+    // Default styling (Locked/Missed)
+    Color bgColor = const Color(0xFF000000);
+    Color borderColor = const Color(0xFF2E2E2E);
+    double opacity = 0.5;
+    
+    Color badgeColor = const Color(0xFF2E2E2E);
+    Color badgeTextColor = Colors.white;
+    String badgeText = "LOCKED";
+    bool glowingBorder = false;
+
+    String timeStr = slot.timeDisplay;
+    Color timeColor = const Color(0xFFB0B0B0);
+
+    // Apply State Transitions
+    switch (state) {
+      case SlotState.available:
+        bgColor = const Color(0xFF0B1F11); // Very dark green background
+        borderColor = const Color(0xFF00E676);
+        opacity = 1.0;
+        badgeColor = const Color(0xFF00E676);
+        badgeTextColor = Colors.black;
+        badgeText = "AVAILABLE NOW";
+        glowingBorder = true;
+        timeColor = const Color(0xFF76FF03);
+        break;
+      case SlotState.collected:
+        borderColor = const Color(0xFF1B5E20);
+        opacity = 0.7;
+        badgeColor = const Color(0xFF1B5E20);
+        if (collectedTime != null) {
+          badgeText = "✓ COLLECTED ${DateFormat('h:mm a').format(collectedTime)}";
+        } else {
+          badgeText = "✓ COLLECTED";
+        }
+        break;
+      case SlotState.locked:
+        final countdown = timeManager.getCountdownText(slot);
+        if (countdown.isNotEmpty) {
+          badgeText = countdown.toUpperCase();
+        }
+        break;
+      case SlotState.expired:
+        badgeText = "EXPIRED";
+        opacity = 0.4;
+        break;
+    }
+
+    final cardContent = Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: glowingBorder ? 2 : 1),
+        boxShadow: glowingBorder ? [
+          BoxShadow(
+            color: const Color(0xFF00E676).withValues(alpha: 0.2),
+            blurRadius: 15,
+            spreadRadius: 2,
+          )
+        ] : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 22, color: Colors.white54),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: collected
-                  ? Colors.green.withValues(alpha: 0.2)
-                  : Colors.grey.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  collected ? Icons.check_circle : Icons.circle_outlined,
-                  size: 16,
-                  color: collected ? Colors.greenAccent : Colors.white30,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Opacity(
+                opacity: opacity,
+                child: Text(slot.icon, style: const TextStyle(fontSize: 28)),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      slot.title,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: opacity),
+                        decoration: state == SlotState.expired ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Time: $timeStr',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: timeColor.withValues(alpha: opacity),
+                        decoration: state == SlotState.expired ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  collected ? 'Collected' : 'Pending',
+              ),
+              // Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  badgeText,
                   style: TextStyle(
-                    color: collected ? Colors.greenAccent : Colors.white30,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: badgeTextColor,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+          
+          if (state == SlotState.available) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _loading ? null : () => _giveItem(slot, pData['action']),
+                child: _loading 
+                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                   : Text('Collect ${slot.title}', style: const TextStyle(fontSize: 16)),
+              ),
+            ),
+          ]
         ],
       ),
     );
-  }
 
-  Widget _buildActionButton(
-    String label,
-    IconData icon,
-    bool alreadyCollected,
-    Color color,
-    VoidCallback onPressed,
-  ) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton.icon(
-        onPressed: alreadyCollected ? null : onPressed,
-        icon: Icon(icon, size: 22),
-        label: Text(
-          alreadyCollected ? '$label ✓ Collected' : label,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: alreadyCollected
-              ? Colors.grey.shade800
-              : color,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: Colors.grey.shade800,
-          disabledForegroundColor: Colors.grey,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          elevation: alreadyCollected ? 0 : 4,
-        ),
-      ),
-    );
+    if (glowingBorder) {
+      return AnimatedBuilder(
+        animation: _pulseAnim,
+        builder: (context, child) {
+          return Opacity(
+            opacity: _pulseAnim.value,
+            child: child,
+          );
+        },
+        child: cardContent,
+      );
+    }
+    
+    return cardContent;
   }
 }

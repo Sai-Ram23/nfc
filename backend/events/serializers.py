@@ -9,7 +9,12 @@ class ParticipantSerializer(serializers.ModelSerializer):
         model = Participant
         fields = [
             'uid', 'name', 'college',
-            'breakfast', 'lunch', 'dinner', 'goodie_collected',
+            'registration_goodies', 'registration_time',
+            'breakfast', 'breakfast_time',
+            'lunch', 'lunch_time',
+            'snacks', 'snacks_time',
+            'dinner', 'dinner_time',
+            'midnight_snacks', 'midnight_snacks_time'
         ]
         read_only_fields = fields
 

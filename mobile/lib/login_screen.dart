@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'api_service.dart';
 import 'scan_screen.dart';
+import 'utils/time_manager.dart';
 
 class LoginScreen extends StatefulWidget {
   final ApiService api;
@@ -98,12 +100,12 @@ class _LoginScreenState extends State<LoginScreen>
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF6C63FF), Color(0xFF3F3D94)],
+                        colors: [Color(0xFF00E676), Color(0xFF1B5E20)],
                       ),
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF6C63FF).withValues(alpha: 0.4),
+                          color: const Color(0xFF00E676).withValues(alpha: 0.4),
                           blurRadius: 30,
                           offset: const Offset(0, 10),
                         ),
@@ -194,8 +196,9 @@ class _LoginScreenState extends State<LoginScreen>
                             child: ElevatedButton(
                               onPressed: _loading ? null : _login,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF6C63FF),
-                                foregroundColor: Colors.white,
+                                backgroundColor: const Color(0xFF00E676),
+                                foregroundColor: Colors.black, // Dark text on bright green looks better
+                                textStyle: const TextStyle(fontWeight: FontWeight.bold),
                               ),
                               child: _loading
                                   ? const SizedBox(
@@ -236,16 +239,78 @@ class _LoginScreenState extends State<LoginScreen>
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: TextField(
-                          controller: _serverUrlController,
-                          decoration: InputDecoration(
-                            labelText: 'Server URL',
-                            hintText: 'http://10.0.2.2:8000/api',
-                            prefixIcon: const Icon(Icons.dns_outlined),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: _serverUrlController,
+                              decoration: InputDecoration(
+                                labelText: 'Server URL',
+                                hintText: 'http://10.248.56.164:8000/api',
+                                prefixIcon: const Icon(Icons.dns_outlined),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Event Timing Configuration',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white24),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Event Start Date (Day 1)', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        DateFormat('MMM dd, yyyy').format(timeManager.eventStartDate),
+                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                                      ),
+                                    ],
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      final date = await showDatePicker(
+                                        context: context,
+                                        initialDate: timeManager.eventStartDate,
+                                        firstDate: DateTime(2020),
+                                        lastDate: DateTime(2030),
+                                        builder: (context, child) {
+                                          return Theme(
+                                            data: Theme.of(context).copyWith(
+                                              colorScheme: const ColorScheme.dark(
+                                                primary: Color(0xFF00E676),
+                                                onPrimary: Colors.black,
+                                                surface: Color(0xFF1C1C1C),
+                                                onSurface: Colors.white,
+                                              ),
+                                            ),
+                                            child: child!,
+                                          );
+                                        },
+                                      );
+                                      if (date != null) {
+                                        await timeManager.setEventStartDate(date);
+                                        setState(() {}); // refresh UI
+                                      }
+                                    },
+                                    child: const Text('Change', style: TextStyle(color: Color(0xFF00E676))),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

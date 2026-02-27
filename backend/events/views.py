@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.utils import timezone
 from django.contrib.auth import authenticate
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -30,6 +31,7 @@ def scan_uid(request):
     try:
         participant = Participant.objects.get(uid=uid)
     except Participant.DoesNotExist:
+        print(f"\n[!] UNREGISTERED TAG SCANNED. UID: {uid}\n    Copy this UID and add it to the Django Admin panel.\n")
         return Response({
             'status': 'invalid',
             'message': 'No participant found with this NFC tag.',
@@ -39,14 +41,22 @@ def scan_uid(request):
         'status': 'valid',
         'name': participant.name,
         'college': participant.college,
+        'registration_goodies': participant.registration_goodies,
+        'registration_time': participant.registration_time,
         'breakfast': participant.breakfast,
+        'breakfast_time': participant.breakfast_time,
         'lunch': participant.lunch,
+        'lunch_time': participant.lunch_time,
+        'snacks': participant.snacks,
+        'snacks_time': participant.snacks_time,
         'dinner': participant.dinner,
-        'goodie_collected': participant.goodie_collected,
+        'dinner_time': participant.dinner_time,
+        'midnight_snacks': participant.midnight_snacks,
+        'midnight_snacks_time': participant.midnight_snacks_time,
     })
 
 
-def _distribute(request, field_name, label):
+def _distribute(request, field_name, time_field_name, label):
     """
     Generic distribution handler.
     Uses transaction.atomic + select_for_update to prevent race conditions.
@@ -73,7 +83,8 @@ def _distribute(request, field_name, label):
                 })
 
             setattr(participant, field_name, True)
-            participant.save(update_fields=[field_name])
+            setattr(participant, time_field_name, timezone.now())
+            participant.save(update_fields=[field_name, time_field_name])
 
             return Response({
                 'status': 'success',
@@ -91,30 +102,44 @@ def _distribute(request, field_name, label):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def give_registration(request):
+    """POST /api/give-registration/"""
+    return _distribute(request, 'registration_goodies', 'registration_time', 'Registration & Goodies')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def give_breakfast(request):
-    """POST /api/give-breakfast/ — Mark breakfast as collected."""
-    return _distribute(request, 'breakfast', 'Breakfast')
+    """POST /api/give-breakfast/"""
+    return _distribute(request, 'breakfast', 'breakfast_time', 'Breakfast')
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def give_lunch(request):
-    """POST /api/give-lunch/ — Mark lunch as collected."""
-    return _distribute(request, 'lunch', 'Lunch')
+    """POST /api/give-lunch/"""
+    return _distribute(request, 'lunch', 'lunch_time', 'Lunch')
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def give_snacks(request):
+    """POST /api/give-snacks/"""
+    return _distribute(request, 'snacks', 'snacks_time', 'Snacks')
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def give_dinner(request):
-    """POST /api/give-dinner/ — Mark dinner as collected."""
-    return _distribute(request, 'dinner', 'Dinner')
+    """POST /api/give-dinner/"""
+    return _distribute(request, 'dinner', 'dinner_time', 'Dinner')
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def give_goodie(request):
-    """POST /api/give-goodie/ — Mark goodie as collected."""
-    return _distribute(request, 'goodie_collected', 'Goodie')
+def give_midnight_snacks(request):
+    """POST /api/give-midnight-snacks/"""
+    return _distribute(request, 'midnight_snacks', 'midnight_snacks_time', 'Midnight Snacks')
 
 
 @api_view(['POST'])
@@ -158,9 +183,11 @@ def dashboard_stats(request):
     total = Participant.objects.count()
     stats = {
         'total_participants': total,
+        'registration_given': Participant.objects.filter(registration_goodies=True).count(),
         'breakfast_given': Participant.objects.filter(breakfast=True).count(),
         'lunch_given': Participant.objects.filter(lunch=True).count(),
+        'snacks_given': Participant.objects.filter(snacks=True).count(),
         'dinner_given': Participant.objects.filter(dinner=True).count(),
-        'goodies_given': Participant.objects.filter(goodie_collected=True).count(),
+        'midnight_snacks_given': Participant.objects.filter(midnight_snacks=True).count(),
     }
     return Response(stats)
