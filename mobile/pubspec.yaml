@@ -9,17 +9,29 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  nfc_manager: ^3.3.0
+  nfc_manager: ^4.1.1
   http: ^1.1.0
   google_fonts: ^6.1.0
   shared_preferences: ^2.2.2
   cupertino_icons: ^1.0.6
   intl: ^0.20.2
+  excel: ^4.0.3
+  csv: ^6.0.0
+  share_plus: ^7.2.1
+  path_provider: ^2.1.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.1
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false
+  image_path: "assets/images/Trojan_Horse_Icon.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/Trojan_Horse_Icon.png"
 
 flutter:
   uses-material-design: true

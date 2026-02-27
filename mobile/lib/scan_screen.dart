@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:nfc_manager/nfc_manager.dart';
-
+import 'package:nfc_manager/nfc_manager_android.dart';
+import 'package:nfc_manager/nfc_manager_ios.dart';
 import 'api_service.dart';
 import 'models.dart';
 
@@ -63,7 +64,8 @@ class _ScanScreenState extends State<ScanScreen>
   }
 
   Future<void> _checkNfc() async {
-    bool available = await NfcManager.instance.isAvailable();
+    final availability = await NfcManager.instance.checkAvailability();
+    bool available = availability == NfcAvailability.enabled;
     setState(() {
       _nfcAvailable = available;
       if (available) {
@@ -80,28 +82,22 @@ class _ScanScreenState extends State<ScanScreen>
     });
 
     NfcManager.instance.startSession(
+      pollingOptions: {
+        NfcPollingOption.iso14443,
+        NfcPollingOption.iso15693,
+        NfcPollingOption.iso18092,
+      },
       onDiscovered: (NfcTag tag) async {
-        final nfca = tag.data['nfca'];
-        final nfcb = tag.data['nfcb'];
-        final nfcf = tag.data['nfcf'];
-        final nfcv = tag.data['nfcv'];
-        final isodep = tag.data['isodep'];
-        final mifare = tag.data['mifareultralight'] ?? tag.data['mifareclassic'];
-
         List<int>? identifier;
 
-        if (nfca != null && nfca['identifier'] != null) {
-          identifier = List<int>.from(nfca['identifier']);
-        } else if (mifare != null && mifare['identifier'] != null) {
-          identifier = List<int>.from(mifare['identifier']);
-        } else if (nfcb != null && nfcb['identifier'] != null) {
-          identifier = List<int>.from(nfcb['identifier']);
-        } else if (nfcf != null && nfcf['identifier'] != null) {
-          identifier = List<int>.from(nfcf['identifier']);
-        } else if (nfcv != null && nfcv['identifier'] != null) {
-          identifier = List<int>.from(nfcv['identifier']);
-        } else if (isodep != null && isodep['identifier'] != null) {
-          identifier = List<int>.from(isodep['identifier']);
+        if (Theme.of(context).platform == TargetPlatform.android) {
+          final androidTag = NfcTagAndroid.from(tag);
+          identifier = androidTag?.id;
+        } else if (Theme.of(context).platform == TargetPlatform.iOS) {
+          identifier = MiFareIos.from(tag)?.identifier ??
+              Iso7816Ios.from(tag)?.identifier ??
+              Iso15693Ios.from(tag)?.identifier ??
+              FeliCaIos.from(tag)?.currentIDm;
         }
 
         if (identifier == null || identifier.isEmpty) {
@@ -118,11 +114,6 @@ class _ScanScreenState extends State<ScanScreen>
 
         _lastScannedUid = uid;
         await _scanUid(uid);
-      },
-      onError: (error) async {
-        setState(() {
-          _statusMessage = 'NFC Error: $error';
-        });
       },
     );
   }
@@ -317,26 +308,31 @@ class _ScanScreenState extends State<ScanScreen>
               return Transform.scale(
                 scale: _pulseAnim.value,
                 child: Container(
-                  padding: const EdgeInsets.all(36),
+                  width: 220,
+                  height: 220,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        const Color(0xFF00E676).withValues(alpha: 0.3),
-                        const Color(0xFF00E676).withValues(alpha: 0.05),
+                        const Color(0xFF00E676).withValues(alpha: 0.25),
+                        const Color(0xFF00E676).withValues(alpha: 0.03),
                       ],
                     ),
                     border: Border.all(
                       color: const Color(0xFF00E676).withValues(alpha: 0.5),
-                      width: 2,
+                      width: 3,
                     ),
                   ),
-                  child: Icon(
-                    _nfcAvailable ? Icons.nfc_rounded : Icons.nfc_outlined,
-                    size: 80,
-                    color: _nfcAvailable
-                        ? const Color(0xFF00E676)
-                        : Colors.grey,
+                  child: Center(
+                    child: Image.asset(
+                      'assets/images/Trojan_Horse.png',
+                      width: 180,
+                      height: 180,
+                      color: _nfcAvailable
+                          ? const Color(0xFF00E676)
+                          : Colors.grey,
+                      colorBlendMode: BlendMode.srcIn,
+                    ),
                   ),
                 ),
               );

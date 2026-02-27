@@ -117,8 +117,16 @@ class _HomeShellState extends State<HomeShell> {
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: const [
             NavigationDestination(
-              icon: Icon(Icons.nfc_outlined, color: Color(0xFFB0B0B0)),
-              selectedIcon: Icon(Icons.nfc_rounded, color: Color(0xFF00E676)),
+              icon: ImageIcon(
+                AssetImage('assets/images/Trojan_Horse.png'),
+                size: 24,
+                color: Color(0xFFB0B0B0),
+              ),
+              selectedIcon: ImageIcon(
+                AssetImage('assets/images/Trojan_Horse.png'),
+                size: 24,
+                color: Color(0xFF00E676),
+              ),
               label: 'Scan',
             ),
             NavigationDestination(
