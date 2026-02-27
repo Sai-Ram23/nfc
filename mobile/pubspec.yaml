@@ -1,5 +1,5 @@
 name: nfc_event_app
-description: NFC-based event management mobile app for food and goodie distribution tracking.
+description: BREACH GATE - NFC-based event distribution system for Siege of Troy.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -23,3 +23,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/

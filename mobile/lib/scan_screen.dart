@@ -6,7 +6,7 @@ import 'package:nfc_manager/nfc_manager.dart';
 
 import 'api_service.dart';
 import 'models.dart';
-import 'login_screen.dart';
+
 import 'utils/time_manager.dart';
 
 class ScanScreen extends StatefulWidget {
@@ -25,29 +25,28 @@ class _ScanScreenState extends State<ScanScreen>
   String _statusMessage = 'Ready to Scan';
   Participant? _participant;
   String? _lastScannedUid;
-  
+  TeamDetails? _teamDetails;
+
   // Timers and Animation controllers
   Timer? _minuteTimer;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
-  
+
   // Store the exact time we fetched the participant to show "Last scanned"
   DateTime? _lastFetchTime;
 
   @override
   void initState() {
     super.initState();
-    // Start pulse animation for Available items / NFC logo
     _pulseController = AnimationController(
        vsync: this,
        duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
-    
+
     _pulseAnim = Tween<double>(begin: 0.8, end: 1.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Refresh time-based logic every minute
     _minuteTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -115,9 +114,8 @@ class _ScanScreenState extends State<ScanScreen>
             .join()
             .toUpperCase();
 
-        // Haptic feedback
         HapticFeedback.lightImpact();
-        
+
         _lastScannedUid = uid;
         await _scanUid(uid);
       },
@@ -140,23 +138,39 @@ class _ScanScreenState extends State<ScanScreen>
     if (!mounted) return;
 
     if (result['status'] == 'valid') {
+      final participant = Participant.fromJson(result);
       setState(() {
-        _participant = Participant.fromJson(result);
+        _participant = participant;
         _lastFetchTime = DateTime.now();
         _statusMessage = 'Participant Found';
         _loading = false;
       });
       HapticFeedback.mediumImpact();
+
+      // Fetch team details if participant has a team
+      if (participant.isTeamMember) {
+        _fetchTeamDetails(participant.teamId);
+      } else {
+        setState(() => _teamDetails = null);
+      }
     } else {
       setState(() {
         _participant = null;
-        _statusMessage = result['status'] == 'invalid' 
-            ? 'Invalid NFC Tag' 
+        _teamDetails = null;
+        _statusMessage = result['status'] == 'invalid'
+            ? 'Invalid NFC Tag'
             : (result['message'] ?? 'Error');
         _loading = false;
       });
       _showToast(result['message'] ?? 'No participant linked to this tag', isError: true);
       HapticFeedback.heavyImpact();
+    }
+  }
+
+  Future<void> _fetchTeamDetails(String teamId) async {
+    final details = await widget.api.getTeamDetails(teamId);
+    if (mounted) {
+      setState(() => _teamDetails = details);
     }
   }
 
@@ -171,11 +185,64 @@ class _ScanScreenState extends State<ScanScreen>
 
     if (response.isSuccess) {
       _showToast('✓ ${slot.title} collected successfully');
-      HapticFeedback.heavyImpact(); // Confirms success
+      HapticFeedback.heavyImpact();
       await _scanUid(_lastScannedUid!);
     } else if (response.isAlreadyCollected) {
       _showToast(response.message, isError: true);
       HapticFeedback.vibrate();
+    } else {
+      _showToast(response.message, isError: true);
+    }
+  }
+
+  Future<void> _distributeToTeam(String itemKey, String itemLabel) async {
+    if (_participant == null || !_participant!.isTeamMember) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF2E2E2E)),
+        ),
+        title: const Text('Distribute to Team', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Give "$itemLabel" to all members of ${_participant!.teamName}?',
+          style: const TextStyle(color: Color(0xFFB0B0B0)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00E676),
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Distribute'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _loading = true);
+    final response = await widget.api.distributeToTeam(
+      _participant!.teamId,
+      itemKey,
+    );
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    if (response.isSuccess) {
+      _showToast('✓ ${response.message}');
+      HapticFeedback.heavyImpact();
+      // Refresh scan + team details
+      await _scanUid(_lastScannedUid!);
     } else {
       _showToast(response.message, isError: true);
     }
@@ -210,19 +277,10 @@ class _ScanScreenState extends State<ScanScreen>
     );
   }
 
-  Future<void> _logout() async {
-    await widget.api.clearToken();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => LoginScreen(api: widget.api),
-      ),
-    );
-  }
-
   void _resetScan() {
     setState(() {
       _participant = null;
+      _teamDetails = null;
       _lastScannedUid = null;
       _statusMessage = 'Hold NFC tag near the device...';
     });
@@ -232,48 +290,19 @@ class _ScanScreenState extends State<ScanScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'NFC Event Manager',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Export feature coming soon")),
-              );
-            },
-          ),
-          if (_participant != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () => _scanUid(_lastScannedUid!),
-              tooltip: 'Refresh Status',
-            ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _logout,
-            tooltip: 'Sign Out',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: _participant != null
-            ? RefreshIndicator(
-                color: const Color(0xFF00E676),
-                backgroundColor: const Color(0xFF1C1C1C),
-                onRefresh: () async {
-                  if (_lastScannedUid != null) {
-                    await _scanUid(_lastScannedUid!);
-                  }
-                },
-                child: _buildParticipantView(),
-              )
-            : _buildScanView(),
-      ),
+    return SafeArea(
+      child: _participant != null
+          ? RefreshIndicator(
+              color: const Color(0xFF00E676),
+              backgroundColor: const Color(0xFF1C1C1C),
+              onRefresh: () async {
+                if (_lastScannedUid != null) {
+                  await _scanUid(_lastScannedUid!);
+                }
+              },
+              child: _buildParticipantView(),
+            )
+          : _buildScanView(),
     );
   }
 
@@ -439,11 +468,10 @@ class _ScanScreenState extends State<ScanScreen>
         'state': state,
         'pData': pData,
         'sortWeight': sortWeight,
-        'startTime': timeManager.getSlotStartTime(slot) // secondary sort
+        'startTime': timeManager.getSlotStartTime(slot)
       });
     }
 
-    // Sort slots logically
     slotData.sort((a, b) {
       if (a['sortWeight'] != b['sortWeight']) {
         return a['sortWeight'].compareTo(b['sortWeight']);
@@ -457,124 +485,22 @@ class _ScanScreenState extends State<ScanScreen>
       padding: const EdgeInsets.all(16),
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        // 1. User Profile Card
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1C1C1C),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF00E676).withValues(alpha: 0.3), width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF00E676).withValues(alpha: 0.05),
-                blurRadius: 20,
-              )
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: const Color(0xFF00E676).withValues(alpha: 0.1),
-                    child: Text(
-                      p.name == 'Unknown' ? '?' : p.name[0].toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF00E676),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          p.name == 'Unknown' ? 'Guest Attendee' : p.name,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          p.college,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFFB0B0B0),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1B5E20),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      p.uid,
-                      style: const TextStyle(fontSize: 12, color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  if (_lastFetchTime != null)
-                    Text(
-                      'Last scanned: ${timeFormat.format(_lastFetchTime!)}',
-                      style: const TextStyle(fontSize: 10, color: Color(0xFFB0B0B0)),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        // 1. User Profile Card with Team Info
+        _buildProfileCard(p, timeFormat, collectedCount),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
 
-        // 2. Progress Indicator
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$collectedCount of 6 items collected',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: List.generate(6, (index) {
-                final isFilled = index < collectedCount;
-                return Expanded(
-                  child: Container(
-                    height: 6,
-                    margin: const EdgeInsets.only(right: 4),
-                    decoration: BoxDecoration(
-                      color: isFilled ? const Color(0xFF00E676) : const Color(0xFF2E2E2E),
-                      borderRadius: BorderRadius.circular(3),
-                      boxShadow: isFilled
-                          ? [const BoxShadow(color: Color(0xFF00E676), blurRadius: 4)]
-                          : null,
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ],
-        ),
+        // 2. Team Context Section (if team member)
+        if (p.isTeamMember) ...[
+          _buildTeamContextSection(p),
+          const SizedBox(height: 16),
+        ],
 
-        const SizedBox(height: 24),
-        
+        // 3. Progress Indicator
+        _buildProgressBar(collectedCount),
+
+        const SizedBox(height: 16),
+
         // Scan another button
         OutlinedButton.icon(
           onPressed: _resetScan,
@@ -589,7 +515,7 @@ class _ScanScreenState extends State<ScanScreen>
 
         const SizedBox(height: 24),
 
-        // 3. Items List
+        // 4. Items List
         if (allExpiredOrCollected)
           Center(
             child: Padding(
@@ -600,7 +526,7 @@ class _ScanScreenState extends State<ScanScreen>
                   const SizedBox(height: 12),
                   const Text('Event Completed', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                   Text('You collected $collectedCount of 6 items', style: const TextStyle(color: Color(0xFFB0B0B0))),
-                  const SizedBox(height: 48), // Padding before end of scroll
+                  const SizedBox(height: 48),
                 ],
               ),
             ),
@@ -611,17 +537,516 @@ class _ScanScreenState extends State<ScanScreen>
     );
   }
 
+  Widget _buildProfileCard(Participant p, DateFormat timeFormat, int collectedCount) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF00E676).withValues(alpha: 0.3), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00E676).withValues(alpha: 0.05),
+            blurRadius: 20,
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Team badge (if team member)
+          if (p.isTeamMember) ...[
+            Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: p.teamColorValue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  p.teamName,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: p.teamColorValue,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: p.isTeamMember
+                    ? p.teamColorValue.withValues(alpha: 0.15)
+                    : const Color(0xFF00E676).withValues(alpha: 0.1),
+                child: Text(
+                  p.name == 'Unknown' ? '?' : p.name[0].toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: p.isTeamMember ? p.teamColorValue : const Color(0xFF00E676),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      p.name == 'Unknown' ? 'Guest Attendee' : p.name,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.school_outlined, size: 14, color: Color(0xFFB0B0B0)),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            p.college,
+                            style: const TextStyle(fontSize: 14, color: Color(0xFFB0B0B0)),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (p.isTeamMember) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.group_outlined, size: 14, color: Color(0xFFB0B0B0)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Team Size: ${p.teamSize} members',
+                            style: const TextStyle(fontSize: 13, color: Color(0xFFB0B0B0)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B5E20),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  p.uid,
+                  style: const TextStyle(fontSize: 11, color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (_lastFetchTime != null)
+                Text(
+                  'Last scanned: ${timeFormat.format(_lastFetchTime!)}',
+                  style: const TextStyle(fontSize: 10, color: Color(0xFFB0B0B0)),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTeamContextSection(Participant p) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2E2E2E)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.group, size: 18, color: p.teamColorValue),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Team: ${p.teamName}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () => _showTeamMembersModal(),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: const Color(0xFF00E676).withValues(alpha: 0.5)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'View Members',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_teamDetails != null) ...[
+            const SizedBox(height: 14),
+            // Team progress bars for each item
+            ..._teamDetails!.teamProgress.entries.map((entry) {
+              final parts = entry.value.split('/');
+              final collected = int.tryParse(parts[0]) ?? 0;
+              final total = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+              final progress = total > 0 ? collected / total : 0.0;
+              final label = _itemLabel(entry.key);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 80,
+                      child: Text(
+                        label,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFFB0B0B0)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(3),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: const Color(0xFF2E2E2E),
+                          color: progress >= 1.0
+                              ? const Color(0xFF00E676)
+                              : const Color(0xFF76FF03),
+                          minHeight: 6,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      entry.value,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: progress >= 1.0 ? const Color(0xFF00E676) : Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            // Distribute to team button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _showDistributeTeamPicker(),
+                icon: Icon(Icons.group_add, size: 18, color: p.teamColorValue),
+                label: const Text(
+                  'Distribute to Entire Team',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: p.teamColorValue.withValues(alpha: 0.5)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            const Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF00E676),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _itemLabel(String key) {
+    const labels = {
+      'registration_goodies': 'Registration',
+      'breakfast': 'Breakfast',
+      'lunch': 'Lunch',
+      'snacks': 'Snacks',
+      'dinner': 'Dinner',
+      'midnight_snacks': 'Midnight',
+    };
+    return labels[key] ?? key;
+  }
+
+  void _showDistributeTeamPicker() {
+    final items = [
+      ('registration_goodies', 'Registration & Goodies', '🎁'),
+      ('breakfast', 'Breakfast', '☕'),
+      ('lunch', 'Lunch', '🍱'),
+      ('snacks', 'Snacks', '🍿'),
+      ('dinner', 'Dinner', '🍽️'),
+      ('midnight_snacks', 'Midnight Snacks', '🌙'),
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2E2E2E),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Distribute to Entire Team',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Select an item to give to all members of ${_participant!.teamName}',
+              style: const TextStyle(fontSize: 13, color: Color(0xFFB0B0B0)),
+            ),
+            const SizedBox(height: 16),
+            ...items.map((item) {
+              final progress = _teamDetails?.teamProgress[item.$1] ?? '?/?';
+              return ListTile(
+                leading: Text(item.$3, style: const TextStyle(fontSize: 24)),
+                title: Text(item.$2, style: const TextStyle(color: Colors.white)),
+                trailing: Text(progress, style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _distributeToTeam(item.$1, item.$2);
+                },
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showTeamMembersModal() {
+    if (_teamDetails == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1C),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        builder: (_, scrollController) {
+          final td = _teamDetails!;
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2E2E2E),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: td.color,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      td.teamName,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${td.memberCount} members',
+                      style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    itemCount: td.members.length,
+                    separatorBuilder: (_, __) => const Divider(color: Color(0xFF2E2E2E), height: 1),
+                    itemBuilder: (_, index) {
+                      final m = td.members[index];
+                      final isCurrentUser = m.uid == _participant!.uid;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          radius: 20,
+                          backgroundColor: isCurrentUser
+                              ? td.color.withValues(alpha: 0.2)
+                              : const Color(0xFF2E2E2E),
+                          child: Text(
+                            m.name.isNotEmpty ? m.name[0].toUpperCase() : '?',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isCurrentUser ? td.color : Colors.white70,
+                            ),
+                          ),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                m.name,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            if (isCurrentUser)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: td.color.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'YOU',
+                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: td.color),
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Text(
+                          '${m.itemsCollected}/6 collected',
+                          style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12),
+                        ),
+                        trailing: SizedBox(
+                          width: 100,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(3),
+                            child: LinearProgressIndicator(
+                              value: m.itemsCollected / 6.0,
+                              backgroundColor: const Color(0xFF2E2E2E),
+                              color: m.itemsCollected >= 6
+                                  ? const Color(0xFF00E676)
+                                  : td.color,
+                              minHeight: 5,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildProgressBar(int collectedCount) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$collectedCount of 6 items collected',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: List.generate(6, (index) {
+            final isFilled = index < collectedCount;
+            return Expanded(
+              child: Container(
+                height: 6,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  color: isFilled ? const Color(0xFF00E676) : const Color(0xFF2E2E2E),
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: isFilled
+                      ? [const BoxShadow(color: Color(0xFF00E676), blurRadius: 4)]
+                      : null,
+                ),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSlotCard(Map<String, dynamic> data) {
     final slot = data['slot'] as DistributionSlot;
     final state = data['state'] as SlotState;
     final pData = data['pData'] as Map<String, dynamic>;
     final collectedTime = pData['time'] as DateTime?;
-    
-    // Default styling (Locked/Missed)
+
     Color bgColor = const Color(0xFF000000);
     Color borderColor = const Color(0xFF2E2E2E);
     double opacity = 0.5;
-    
+
     Color badgeColor = const Color(0xFF2E2E2E);
     Color badgeTextColor = Colors.white;
     String badgeText = "LOCKED";
@@ -630,10 +1055,9 @@ class _ScanScreenState extends State<ScanScreen>
     String timeStr = slot.timeDisplay;
     Color timeColor = const Color(0xFFB0B0B0);
 
-    // Apply State Transitions
     switch (state) {
       case SlotState.available:
-        bgColor = const Color(0xFF0B1F11); // Very dark green background
+        bgColor = const Color(0xFF0B1F11);
         borderColor = const Color(0xFF00E676);
         opacity = 1.0;
         badgeColor = const Color(0xFF00E676);
@@ -715,7 +1139,6 @@ class _ScanScreenState extends State<ScanScreen>
                   ],
                 ),
               ),
-              // Badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -733,7 +1156,7 @@ class _ScanScreenState extends State<ScanScreen>
               ),
             ],
           ),
-          
+
           if (state == SlotState.available) ...[
             const SizedBox(height: 16),
             SizedBox(
@@ -741,7 +1164,7 @@ class _ScanScreenState extends State<ScanScreen>
               height: 50,
               child: ElevatedButton(
                 onPressed: _loading ? null : () => _giveItem(slot, pData['action']),
-                child: _loading 
+                child: _loading
                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
                    : Text('Collect ${slot.title}', style: const TextStyle(fontSize: 16)),
               ),
@@ -763,7 +1186,7 @@ class _ScanScreenState extends State<ScanScreen>
         child: cardContent,
       );
     }
-    
+
     return cardContent;
   }
 }

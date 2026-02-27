@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 
-/// HTTP client for the NFC event backend API.
+/// HTTP client for the BREACH GATE backend API.
 class ApiService {
   // Change this to your server IP/domain
   static String baseUrl = 'http://10.0.2.2:8000/api';
@@ -38,6 +38,10 @@ class ApiService {
         if (_authToken != null) 'Authorization': 'Token $_authToken',
       };
 
+  // ──────────────────────────────────────────────
+  //  AUTH
+  // ──────────────────────────────────────────────
+
   /// POST /api/login/ — Authenticate and get token.
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
@@ -66,6 +70,10 @@ class ApiService {
     }
   }
 
+  // ──────────────────────────────────────────────
+  //  SCAN
+  // ──────────────────────────────────────────────
+
   /// POST /api/scan/ — Lookup participant by NFC UID.
   Future<Map<String, dynamic>> scanUid(String uid) async {
     try {
@@ -84,6 +92,10 @@ class ApiService {
       };
     }
   }
+
+  // ──────────────────────────────────────────────
+  //  INDIVIDUAL DISTRIBUTION
+  // ──────────────────────────────────────────────
 
   /// Generic distribution request.
   Future<DistributionResponse> _distribute(String endpoint, String uid) async {
@@ -121,6 +133,124 @@ class ApiService {
 
   Future<DistributionResponse> giveMidnightSnacks(String uid) =>
       _distribute('give-midnight-snacks', uid);
+
+  // ──────────────────────────────────────────────
+  //  TEAM ENDPOINTS
+  // ──────────────────────────────────────────────
+
+  /// GET /api/team/<teamId>/ — Get full team details with members and progress.
+  Future<TeamDetails?> getTeamDetails(String teamId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/team/$teamId/'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return TeamDetails.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// POST /api/distribute-team/ — Bulk distribute an item to all team members.
+  Future<TeamDistributionResponse> distributeToTeam(
+      String teamId, String item) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/distribute-team/'),
+        headers: _headers,
+        body: jsonEncode({'team_id': teamId, 'item': item}),
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return TeamDistributionResponse.fromJson(data);
+    } catch (e) {
+      return TeamDistributionResponse(
+        status: 'error',
+        message: 'Network error: Could not connect to server.',
+        distributed: [],
+        alreadyCollected: [],
+      );
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  //  DASHBOARD & STATS
+  // ──────────────────────────────────────────────
+
+  /// GET /api/stats/ — Get dashboard statistics.
+  Future<DashboardStats?> getDashboardStats() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/stats/'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return DashboardStats.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// GET /api/teams/stats/ — Get team-level statistics and leaderboard.
+  Future<Map<String, dynamic>?> getTeamsStats() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/teams/stats/'),
+        headers: _headers,
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  //  ATTENDEES
+  // ──────────────────────────────────────────────
+
+  /// GET /api/attendees/ — Get attendee list with optional search/filter/view.
+  Future<Map<String, dynamic>?> getAttendees({
+    String? search,
+    String? filter,
+    String view = 'individual',
+  }) async {
+    try {
+      final queryParams = <String, String>{
+        'view': view,
+        if (search != null && search.isNotEmpty) 'search': search,
+        if (filter != null && filter.isNotEmpty) 'filter': filter,
+      };
+
+      final uri = Uri.parse('$baseUrl/attendees/')
+          .replace(queryParameters: queryParams);
+
+      final response = await http.get(uri, headers: _headers);
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  //  CONFIG
+  // ──────────────────────────────────────────────
 
   /// Update base URL (for settings screen).
   static void setBaseUrl(String url) {

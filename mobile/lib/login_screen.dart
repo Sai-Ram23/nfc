@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'api_service.dart';
-import 'scan_screen.dart';
+import 'home_shell.dart';
 import 'utils/time_manager.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -72,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen>
     if (result['status'] == 'success') {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ScanScreen(api: widget.api),
+          builder: (_) => HomeShell(api: widget.api),
         ),
       );
     } else {
@@ -86,6 +86,7 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF000000),
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnim,
@@ -95,46 +96,64 @@ class _LoginScreenState extends State<LoginScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // App Icon
+                  // Trojan Horse Logo
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF00E676), Color(0xFF1B5E20)],
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF00E676).withValues(alpha: 0.3),
+                        width: 2,
                       ),
-                      borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF00E676).withValues(alpha: 0.4),
+                          color: const Color(0xFF00E676).withValues(alpha: 0.2),
                           blurRadius: 30,
-                          offset: const Offset(0, 10),
+                          spreadRadius: 5,
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.nfc_rounded,
-                      size: 64,
-                      color: Colors.white,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/Trojan_Horse.png',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  // Title
-                  Text(
-                    'NFC Event Manager',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                  // BREACH GATE title
+                  const Text(
+                    'BREACH GATE',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                      letterSpacing: 4,
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
-                    'Sign in to manage event distribution',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white54,
-                        ),
+                    'NFC Distribution System',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      color: const Color(0xFF00E676).withValues(alpha: 0.7),
+                      letterSpacing: 2,
+                    ),
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 6),
+                  Text(
+                    'ADMIN ACCESS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.35),
+                      letterSpacing: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 36),
 
                   // Login Card
                   Card(
@@ -151,6 +170,13 @@ class _LoginScreenState extends State<LoginScreen>
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF00E676),
+                                  width: 2,
+                                ),
+                              ),
                             ),
                             textInputAction: TextInputAction.next,
                           ),
@@ -164,6 +190,13 @@ class _LoginScreenState extends State<LoginScreen>
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF00E676),
+                                  width: 2,
+                                ),
+                              ),
                             ),
                             textInputAction: TextInputAction.done,
                             onSubmitted: (_) => _login(),
@@ -175,16 +208,30 @@ class _LoginScreenState extends State<LoginScreen>
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.1),
+                                color: const Color(0xFFFF5252).withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: Colors.red.withValues(alpha: 0.3),
+                                  color: const Color(0xFFFF5252).withValues(alpha: 0.3),
                                 ),
                               ),
-                              child: Text(
-                                _error!,
-                                style: const TextStyle(color: Colors.redAccent),
-                                textAlign: TextAlign.center,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.error_outline,
+                                    color: Color(0xFFFF5252),
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _error!,
+                                      style: const TextStyle(
+                                        color: Color(0xFFFF5252),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -197,8 +244,14 @@ class _LoginScreenState extends State<LoginScreen>
                               onPressed: _loading ? null : _login,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF00E676),
-                                foregroundColor: Colors.black, // Dark text on bright green looks better
-                                textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                                foregroundColor: Colors.black,
+                                disabledBackgroundColor:
+                                    const Color(0xFF00E676).withValues(alpha: 0.3),
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  letterSpacing: 1,
+                                ),
                               ),
                               child: _loading
                                   ? const SizedBox(
@@ -209,7 +262,7 @@ class _LoginScreenState extends State<LoginScreen>
                                         color: Colors.white,
                                       ),
                                     )
-                                  : const Text('Sign In'),
+                                  : const Text('SIGN IN'),
                             ),
                           ),
                         ],
@@ -227,11 +280,13 @@ class _LoginScreenState extends State<LoginScreen>
                           ? Icons.settings
                           : Icons.settings_outlined,
                       size: 18,
+                      color: const Color(0xFFB0B0B0),
                     ),
                     label: Text(
                       _showServerConfig
                           ? 'Hide Server Config'
                           : 'Server Config',
+                      style: const TextStyle(color: Color(0xFFB0B0B0)),
                     ),
                   ),
 
@@ -251,31 +306,54 @@ class _LoginScreenState extends State<LoginScreen>
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF00E676),
+                                    width: 2,
+                                  ),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 16),
                             const Text(
                               'Event Timing Configuration',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white70,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
                               decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white24),
+                                border: Border.all(color: const Color(0xFF2E2E2E)),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      const Text('Event Start Date (Day 1)', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                      const Text(
+                                        'Event Start Date (Day 1)',
+                                        style: TextStyle(
+                                          color: Color(0xFFB0B0B0),
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        DateFormat('MMM dd, yyyy').format(timeManager.eventStartDate),
-                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                                        DateFormat('MMM dd, yyyy')
+                                            .format(timeManager.eventStartDate),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 16,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -283,13 +361,15 @@ class _LoginScreenState extends State<LoginScreen>
                                     onPressed: () async {
                                       final date = await showDatePicker(
                                         context: context,
-                                        initialDate: timeManager.eventStartDate,
+                                        initialDate:
+                                            timeManager.eventStartDate,
                                         firstDate: DateTime(2020),
                                         lastDate: DateTime(2030),
                                         builder: (context, child) {
                                           return Theme(
                                             data: Theme.of(context).copyWith(
-                                              colorScheme: const ColorScheme.dark(
+                                              colorScheme:
+                                                  const ColorScheme.dark(
                                                 primary: Color(0xFF00E676),
                                                 onPrimary: Colors.black,
                                                 surface: Color(0xFF1C1C1C),
@@ -301,11 +381,16 @@ class _LoginScreenState extends State<LoginScreen>
                                         },
                                       );
                                       if (date != null) {
-                                        await timeManager.setEventStartDate(date);
-                                        setState(() {}); // refresh UI
+                                        await timeManager
+                                            .setEventStartDate(date);
+                                        setState(() {});
                                       }
                                     },
-                                    child: const Text('Change', style: TextStyle(color: Color(0xFF00E676))),
+                                    child: const Text(
+                                      'Change',
+                                      style: TextStyle(
+                                          color: Color(0xFF00E676)),
+                                    ),
                                   ),
                                 ],
                               ),

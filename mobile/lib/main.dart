@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'api_service.dart';
-import 'login_screen.dart';
-import 'scan_screen.dart';
-import 'utils/time_manager.dart';
+import 'splash_screen.dart';
 
 void main() {
-  runApp(const NfcEventApp());
+  runApp(const BreachGateApp());
 }
 
-class NfcEventApp extends StatelessWidget {
-  const NfcEventApp({super.key});
+class BreachGateApp extends StatelessWidget {
+  const BreachGateApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NFC Event Manager',
+      title: 'BREACH GATE',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: const ColorScheme.dark(
@@ -27,6 +24,7 @@ class NfcEventApp extends StatelessWidget {
           onSurface: Colors.white,
         ),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF000000),
         textTheme: GoogleFonts.interTextTheme(
           ThemeData(brightness: Brightness.dark).textTheme,
         ),
@@ -58,50 +56,7 @@ class NfcEventApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const AppInitializer(),
+      home: const SplashScreen(),
     );
-  }
-}
-
-/// Checks for saved auth token on startup and routes accordingly.
-class AppInitializer extends StatefulWidget {
-  const AppInitializer({super.key});
-
-  @override
-  State<AppInitializer> createState() => _AppInitializerState();
-}
-
-class _AppInitializerState extends State<AppInitializer> {
-  final ApiService _api = ApiService();
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    await timeManager.init();
-    await _api.loadToken();
-    if (mounted) {
-      setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    if (_api.isLoggedIn) {
-      return ScanScreen(api: _api);
-    }
-    return LoginScreen(api: _api);
   }
 }
