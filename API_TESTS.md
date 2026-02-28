@@ -76,6 +76,55 @@ curl -X POST http://localhost:8000/api/scan/ \
 
 ---
 
+## Pre-Registration
+
+### List Pre-Registered Teams
+Fetch teams that have unassigned pre-registered member slots.
+
+```bash
+curl -X GET http://localhost:8000/api/prereg/teams/ \
+  -H "Authorization: Token YOUR_TOKEN_HERE"
+```
+
+**Response (200):**
+```json
+[
+  {
+    "team_id": "team_alpha",
+    "team_name": "Team Alpha",
+    "unregistered_members": [
+      {
+        "id": 1,
+        "name": "Jane Smith",
+        "college": "Testing College"
+      }
+    ]
+  }
+]
+```
+
+### Register (Link) a Blank NFC Tag
+Link a physical NFC tag UID to a pre-registered slot.
+
+```bash
+curl -X POST http://localhost:8000/api/prereg/register/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Token YOUR_TOKEN_HERE" \
+  -d '{"uid": "NEWTAG12345", "prereg_member_id": 1}'
+```
+
+**Response (201):**
+```json
+{
+  "status": "registered",
+  "message": "Successfully linked NEWTAG12345 to Jane Smith.",
+  "name": "Jane Smith",
+  "team_id": "team_alpha"
+}
+```
+
+---
+
 ## Food Distribution
 
 ### Give Breakfast (First Time — Success)

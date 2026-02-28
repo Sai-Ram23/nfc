@@ -56,11 +56,12 @@ GRANT ALL PRIVILEGES ON DATABASE nfc_events TO nfc_user;
 
 Uncomment the PostgreSQL config in `settings.py` and update credentials.
 
-### Run Migrations and Seed
+### Run Migrations and Import Data
 
 ```bash
 python manage.py migrate
-python manage.py seed_data --count 500
+# IMPORTANT: Use your actual production CSV to build the teams and slots
+python manage.py import_prereg /path/to/production_participants.csv
 python manage.py collectstatic --noinput
 ```
 

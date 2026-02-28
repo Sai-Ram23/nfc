@@ -123,24 +123,26 @@ The APK will be at `build/app/outputs/flutter-apk/`.
 
 ## 3. Testing the System
 
-### Quick Test Flow
+### Quick Test Flow (Without NFC)
 
 1. Start the Django backend: `python manage.py runserver 0.0.0.0:8000`
-2. Note sample UIDs from the seed output
-3. Run the Flutter app on your Android device
-4. Login with `admin` / `admin123`
-5. Tap the **"Enter UID manually"** button (for testing without NFC tags)
-6. Enter a sample UID from the seed data
+2. Run the Flutter app on your Android device/emulator
+3. Login with `admin` / `admin123`
+4. Tap the **"Enter UID manually"** button on the Scan Screen
+5. **Simulate a Blank Tag:** Enter `NEWTAG111`. A bottom sheet will open letting you create a new team or assign to an existing pre-registered slot.
+6. **Simulate an Existing Tag:** Enter a sample UID from the seed output.
 7. Tap the distribution buttons (Breakfast, Lunch, Dinner, Goodie)
 8. Try tapping the same button again — should show "Already Collected" (red)
 
-### With NFC Tags
+### With Real NFC Tags
 
 1. Enable NFC on your Android device
-2. Hold an NXP MIFARE Ultralight tag near the device
+2. Hold an NXP MIFARE/Ultralight tag near the device
 3. The app reads the hardware UID automatically
-4. If the UID is registered, participant info appears
-5. Use the buttons to distribute items
+4. **Blank Tag:** If unregistered, the Registration bottom-sheet appears.
+5. **Registered Tag:** Participant info appears.
+6. Use the buttons to distribute items
+
 
 ### API Testing with curl
 
@@ -148,37 +150,27 @@ See [API_TESTS.md](API_TESTS.md) for curl examples.
 
 ---
 
-## 4. Registering Real NFC Tags
+## 4. Registering Real NFC Tags (Production Workflow)
 
-To register real NFC UIDs in the database:
+To register real NFC UIDs in the database, follow the two-step Pre-Registration Workflow:
 
-### Via Django Admin
-
-1. Go to `http://localhost:8000/admin/events/participant/add/`
-2. Enter the NFC tag UID (uppercase hex, no colons)
-3. Fill in name and college
-4. Save
-
-### Via Django Shell
-
+### Step 1: Bulk Import via CSV
+Before the event, prepare a CSV file with columns: `Name`, `College`, `Team Name` (optional).
+Load them into the backend:
 ```bash
-python manage.py shell
+python manage.py import_prereg /path/to/data.csv
 ```
+This sets up `PreRegisteredMember` slots.
 
-```python
-from events.models import Participant
+### Step 2: Physical Tag Linking (Event Day)
+1. Open the Flutter app to the **Scan** tab.
+2. Tap a physical (blank) NFC tag to the phone.
+3. The screen will prompt the Registration Bottom Sheet.
+4. Select the Team and Name of the participant standing in front of you.
+5. Tap **Register Tag**. The tag is now permanently bound to the participant in the database!
 
-# Register a tag
-Participant.objects.create(
-    uid='04A23B1C5D6E80',
-    name='Rahul Kumar',
-    college='IIT Madras'
-)
-```
+*(Optional)* You can also still use the **Django Admin** (`http://localhost:8000/admin/events/participant/add/`) or **Django Shell** for emergency manual overrides.
 
-### Bulk Import via CSV (Optional)
-
-You can create a management command to import from CSV. The seed_data command serves as a template.
 
 ---
 
