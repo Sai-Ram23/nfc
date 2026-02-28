@@ -1,4 +1,4 @@
-# BREACH GATE — NFC Event Distribution System (V3)
+# BREACH GATE — NFC Event Distribution System (V3.1)
 
 A robust NFC-based event management system for **Siege of Troy** at **Malla Reddy University**. Built with a Django backend and Flutter frontend, it orchestrates team-aware item distribution (Registration, Meals, Snacks) across a 48-hour event using physical NFC tags and atomic database transactions.
 
@@ -8,6 +8,7 @@ A robust NFC-based event management system for **Siege of Troy** at **Malla Redd
 - [Frontend Structure](#frontend-structure)
 - [Team System](#team-system)
 - [Time-Based Distribution Logic](#time-based-distribution-logic)
+- [Export Functionality](#export-functionality)
 - [Setup & Deployment](#setup--deployment)
 - [Testing](#testing)
 
@@ -23,8 +24,8 @@ A robust NFC-based event management system for **Siege of Troy** at **Malla Redd
 - Admin inputs credentials → `POST /api/login/` → Token is issued and cached locally.
 
 ### 2. NFC Tag Scanning
-- The **Scan** tab initializes NFC hardware. A pulsing green NFC icon indicates readiness.
-- When an NFC tag is tapped, the `nfc_manager` plugin reads the hardware UID across multiple technologies (NFCA, MIFARE, ISO-DEP, NFCV).
+- The **Scan** tab initializes NFC hardware. A pulsing green Trojan Horse icon indicates readiness.
+- When an NFC tag is tapped, the `nfc_manager` plugin reads the hardware UID using platform-specific APIs (`NfcTagAndroid` on Android; `MiFareIos`, `Iso7816Ios`, `Iso15693Ios`, `FeliCaIos` on iOS).
 - The raw byte array is parsed into an **uppercase hexadecimal UID** (e.g., `5337EACC730001`).
 - A `POST /api/scan/` request validates the UID and returns participant + team data.
 
@@ -50,6 +51,10 @@ The `TimeManager` maps 6 distribution slots against the current clock relative t
 ### 6. Team Bulk Distribution
 - Admin taps **"Distribute to Entire Team"** → selects an item → `POST /api/distribute-team/`.
 - Backend iterates all team members, skipping those who already collected, and returns a summary.
+
+### 7. Manual Distribution & Export
+- The **Manual** tab is a full participant browser with debounced search, filter chips (All/Teams/Solo), expandable team cards, and inline GIVE buttons.
+- An **Export** button converts all participant data to CSV or multi-sheet XLSX (Participants, Distribution Status, Team Summary) and opens the native share sheet.
 
 ---
 
@@ -92,7 +97,7 @@ Built with **Flutter 3+** using the **Black & Green** aesthetic (`#00E676` prima
 | **Scan** | `scan_screen.dart` | NFC scanning, participant view, team context, distribution |
 | **Dashboard** | `dashboard_screen.dart` | Stats cards, distribution progress bars, team leaderboard |
 | **Attendees** | `attendees_screen.dart` | Searchable list, filter chips, individual/team views |
-| **Manual** | `manual_screen.dart` | UID text entry for non-NFC distribution |
+| **Manual** | `manual_screen.dart` | Participant browser with search/filter/distribute + CSV/XLSX export |
 | **Settings** | `settings_screen.dart` | Server URL config, event date picker, about, logout |
 
 ### File Structure
@@ -105,8 +110,9 @@ lib/
 ├── scan_screen.dart          # NFC scanning, team context, distribution
 ├── dashboard_screen.dart     # Stats, progress, team leaderboard
 ├── attendees_screen.dart     # Search, filters, individual/team views
-├── manual_screen.dart        # UID-based manual distribution
+├── manual_screen.dart        # Participant browser + inline distribute + export
 ├── settings_screen.dart      # Server config, event timing, about
+├── export_service.dart       # CSV/XLSX generation + share sheet
 ├── models.dart               # Data classes (Team, Participant, etc.)
 ├── api_service.dart          # HTTP client + token persistence
 └── utils/
@@ -144,6 +150,19 @@ All timing is relative to the configurable **Event Start Date (Day 1)**:
 
 ---
 
+## Export Functionality
+
+The **Manual** tab includes an export button that generates a file and opens the native share sheet:
+
+| Format | Contents |
+|---|---|
+| **CSV** | Single sheet with all participants, UID, Name, College, Team, and item collection status (YES/NO) |
+| **XLSX** | 3 sheets — "Participants", "Distribution Status" (✓ per item), "Team Summary" (completion %) |
+
+Files are named `BreachGate_Export_YYYYMMDD_HHmmss.csv/.xlsx` and saved to a temp directory before sharing.
+
+---
+
 ## Setup & Deployment
 
 ### Backend (Django)
@@ -164,7 +183,7 @@ cd mobile
 flutter pub get
 flutter run
 ```
-> **NFC**: Android requires `AndroidManifest.xml` hardware permission. iOS requires Xcode NFC capability.
+> **Requirements**: Flutter SDK 3.x · Android device with NFC · Kotlin 2.1.0+ in Gradle
 
 ### Build APK
 ```bash
@@ -185,6 +204,6 @@ Covers: authentication, NFC scan, 6 distribution endpoints, duplicate collision 
 ### Frontend
 ```bash
 cd mobile
-flutter analyze
+flutter analyze      # Zero issues
 flutter test
 ```

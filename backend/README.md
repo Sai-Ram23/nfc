@@ -1,4 +1,4 @@
-# BREACH GATE — Backend Server (Django V3)
+# BREACH GATE — Backend Server (Django V3.1)
 
 The Django REST API backend for the BREACH GATE NFC Event Distribution System. Serves as the single source of truth for participant validation, atomic food distribution, team management, and analytical statistics.
 
@@ -35,7 +35,9 @@ Built on **Django 5.0** + **Django REST Framework (DRF)** with SQLite (developme
 | `POST` | `/api/distribute-team/` | Token | Bulk distribute one item to entire team |
 | `GET` | `/api/stats/` | Token | Dashboard stats (totals, per-item counts, team breakdown) |
 | `GET` | `/api/teams/stats/` | Token | Team leaderboard (completion rates, rankings) |
-| `GET` | `/api/attendees/` | Token | Searchable attendee list (supports `?search=`, `?filter=`, `?view=team`) |
+| `GET` | `/api/attendees/` | Token | Searchable attendee list (supports `?search=`, `?filter=`, `?view=team\|individual`) |
+
+> The `/api/attendees/` endpoint is also used by the Flutter export feature to fetch all participant data for CSV/XLSX generation.
 
 ---
 
