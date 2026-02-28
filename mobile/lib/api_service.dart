@@ -256,4 +256,93 @@ class ApiService {
   static void setBaseUrl(String url) {
     baseUrl = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
   }
+
+  // ──────────────────────────────────────────────
+  //  PRE-REGISTRATION
+  // ──────────────────────────────────────────────
+
+  /// GET /api/prereg/teams/ — Fetch all teams with unlinked member slots.
+  Future<List<PreregTeam>> getPreregTeams() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/prereg/teams/'),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List<dynamic>;
+        return data
+            .map((t) => PreregTeam.fromJson(t as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// POST /api/prereg/register/ — Link NFC UID to a pre-registered member slot.
+  /// Returns the created Participant data map on success or an error map.
+  Future<Map<String, dynamic>> registerNfcTag(
+      String uid, int preregMemberId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/prereg/register/'),
+        headers: _headers,
+        body: jsonEncode({'uid': uid, 'prereg_member_id': preregMemberId}),
+      );
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {
+        'status': 'error',
+        'message': 'Network error: Could not connect to server.\n$e',
+      };
+    }
+  }
+
+  /// POST /api/prereg/teams/create/ — Create a new team from the app.
+  Future<Map<String, dynamic>> createPreregTeam({
+    required String teamId,
+    required String teamName,
+    required String teamColor,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/prereg/teams/create/'),
+        headers: _headers,
+        body: jsonEncode({
+          'team_id': teamId,
+          'team_name': teamName,
+          'team_color': teamColor,
+        }),
+      );
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {
+        'status': 'error',
+        'message': 'Network error: Could not connect to server.\n$e',
+      };
+    }
+  }
+
+  /// POST /api/prereg/teams/<teamId>/add-member/ — Add a member slot to a team.
+  Future<Map<String, dynamic>> addPreregMember({
+    required String teamId,
+    required String name,
+    required String college,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/prereg/teams/$teamId/add-member/'),
+        headers: _headers,
+        body: jsonEncode({'name': name, 'college': college}),
+      );
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {
+        'status': 'error',
+        'message': 'Network error: Could not connect to server.\n$e',
+      };
+    }
+  }
 }
+

@@ -144,16 +144,22 @@ class _ScanScreenState extends State<ScanScreen>
       } else {
         setState(() => _teamDetails = null);
       }
+    } else if (result['status'] == 'unregistered') {
+      // Blank card — show the registration sheet
+      setState(() {
+        _loading = false;
+        _statusMessage = 'Hold NFC tag near the device...';
+      });
+      HapticFeedback.mediumImpact();
+      _showRegisterTagSheet(uid);
     } else {
       setState(() {
         _participant = null;
         _teamDetails = null;
-        _statusMessage = result['status'] == 'invalid'
-            ? 'Invalid NFC Tag'
-            : (result['message'] ?? 'Error');
+        _statusMessage = result['message'] ?? 'Error';
         _loading = false;
       });
-      _showToast(result['message'] ?? 'No participant linked to this tag', isError: true);
+      _showToast(result['message'] ?? 'Network error', isError: true);
       HapticFeedback.heavyImpact();
     }
   }
@@ -275,6 +281,267 @@ class _ScanScreenState extends State<ScanScreen>
       _lastScannedUid = null;
       _statusMessage = 'Hold NFC tag near the device...';
     });
+  }
+
+  /// Shown when an unregistered (blank) NFC card is tapped.
+  /// Lets the organizer pick a team + member to link this card to.
+  Future<void> _showRegisterTagSheet(String uid) async {
+    // Fetch pre-reg teams
+    final teams = await widget.api.getPreregTeams();
+    if (!mounted) return;
+
+    // Only show teams that still have unlinked slots
+    final availableTeams =
+        teams.where((t) => t.hasUnregisteredSlots).toList();
+
+    if (availableTeams.isEmpty) {
+      _showToast(
+        'No pre-registered member slots available. Add members in the Teams tab first.',
+        isError: true,
+      );
+      return;
+    }
+
+    PreregTeam? selectedTeam;
+    PreregMember? selectedMember;
+    bool registering = false;
+    String? errorMessage;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1C1C1C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+                top: 24,
+                left: 24,
+                right: 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  // Title
+                  const Row(
+                    children: [
+                      Icon(Icons.nfc, color: Color(0xFF00E676), size: 22),
+                      SizedBox(width: 10),
+                      Text(
+                        'Register NFC Tag',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'UID: $uid',
+                    style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: Color(0xFF00E676),
+                        fontSize: 12),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Team dropdown
+                  const Text('Team',
+                      style: TextStyle(
+                          color: Color(0xFFB0B0B0),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2E2E2E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF3E3E3E)),
+                    ),
+                    child: DropdownButton<PreregTeam>(
+                      value: selectedTeam,
+                      isExpanded: true,
+                      underline: const SizedBox(),
+                      dropdownColor: const Color(0xFF2E2E2E),
+                      hint: const Text('Select team',
+                          style: TextStyle(color: Colors.white54)),
+                      items: availableTeams.map((team) {
+                        return DropdownMenuItem(
+                          value: team,
+                          child: Text(team.teamName,
+                              style: const TextStyle(color: Colors.white)),
+                        );
+                      }).toList(),
+                      onChanged: (team) {
+                        setSheetState(() {
+                          selectedTeam = team;
+                          selectedMember = null; // reset member when team changes
+                          errorMessage = null;
+                        });
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Member dropdown (only shown when a team is selected)
+                  if (selectedTeam != null) ...[
+                    const Text('Member',
+                        style: TextStyle(
+                            color: Color(0xFFB0B0B0),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2E2E2E),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3E3E3E)),
+                      ),
+                      child: DropdownButton<PreregMember>(
+                        value: selectedMember,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        dropdownColor: const Color(0xFF2E2E2E),
+                        hint: const Text('Select member',
+                            style: TextStyle(color: Colors.white54)),
+                        items: selectedTeam!.unregisteredMembers.map((m) {
+                          return DropdownMenuItem(
+                            value: m,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(m.name,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600)),
+                                Text(m.college,
+                                    style: const TextStyle(
+                                        color: Color(0xFFB0B0B0),
+                                        fontSize: 11)),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (member) {
+                          setSheetState(() {
+                            selectedMember = member;
+                            errorMessage = null;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ] else
+                    const SizedBox(height: 20),
+
+                  // Error message
+                  if (errorMessage != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF5252).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: const Color(0xFFFF5252).withValues(alpha: 0.4)),
+                      ),
+                      child: Text(errorMessage!,
+                          style: const TextStyle(
+                              color: Color(0xFFFF5252), fontSize: 13)),
+                    ),
+                  ],
+
+                  // Confirm button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: (selectedTeam != null &&
+                              selectedMember != null &&
+                              !registering)
+                          ? () async {
+                              setSheetState(() => registering = true);
+                              final result = await widget.api.registerNfcTag(
+                                  uid, selectedMember!.id);
+                              if (!ctx.mounted) return;
+
+                              if (result['status'] == 'registered') {
+                                Navigator.pop(ctx);
+                                // Load participant view immediately
+                                final participant =
+                                    Participant.fromJson(result);
+                                setState(() {
+                                  _participant = participant;
+                                  _lastFetchTime = DateTime.now();
+                                  _statusMessage = 'Registered & Ready!';
+                                });
+                                HapticFeedback.heavyImpact();
+                                if (participant.isTeamMember) {
+                                  _fetchTeamDetails(participant.teamId);
+                                }
+                              } else {
+                                setSheetState(() {
+                                  registering = false;
+                                  errorMessage =
+                                      result['message'] ?? 'Registration failed.';
+                                });
+                              }
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E676),
+                        foregroundColor: Colors.black,
+                        disabledBackgroundColor:
+                            const Color(0xFF00E676).withValues(alpha: 0.3),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: registering
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.black,
+                              ))
+                          : const Text(
+                              'Confirm Registration',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // --- UI Builders ---

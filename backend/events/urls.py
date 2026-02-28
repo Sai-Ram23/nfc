@@ -16,4 +16,10 @@ urlpatterns = [
     path('distribute-team/', views.distribute_team, name='api-distribute-team'),
     path('teams/stats/', views.teams_stats, name='api-teams-stats'),
     path('attendees/', views.attendees_list, name='api-attendees'),
+    # Pre-registration endpoints
+    path('prereg/teams/', views.prereg_teams_list, name='api-prereg-teams'),
+    path('prereg/register/', views.register_nfc_tag, name='api-prereg-register'),
+    path('prereg/teams/create/', views.create_prereg_team, name='api-prereg-create-team'),
+    path('prereg/teams/<str:team_id>/add-member/', views.add_prereg_member, name='api-prereg-add-member'),
 ]
+

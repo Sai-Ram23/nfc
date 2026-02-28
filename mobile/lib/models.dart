@@ -333,3 +333,53 @@ class DashboardStats {
   int get dinnerPending => totalParticipants - dinnerGiven;
   int get midnightSnacksPending => totalParticipants - midnightSnacksGiven;
 }
+
+/// A single pre-registered member slot (name + college, no NFC UID yet).
+class PreregMember {
+  final int id;
+  final String name;
+  final String college;
+
+  PreregMember({
+    required this.id,
+    required this.name,
+    required this.college,
+  });
+
+  factory PreregMember.fromJson(Map<String, dynamic> json) {
+    return PreregMember(
+      id: json['id'] as int,
+      name: json['name'] ?? '',
+      college: json['college'] ?? '',
+    );
+  }
+}
+
+/// A team with its list of unregistered (unlinked) member slots.
+class PreregTeam {
+  final String teamId;
+  final String teamName;
+  final String teamColor;
+  final List<PreregMember> unregisteredMembers;
+
+  PreregTeam({
+    required this.teamId,
+    required this.teamName,
+    required this.teamColor,
+    required this.unregisteredMembers,
+  });
+
+  factory PreregTeam.fromJson(Map<String, dynamic> json) {
+    return PreregTeam(
+      teamId: json['team_id'] ?? '',
+      teamName: json['team_name'] ?? '',
+      teamColor: json['team_color'] ?? '#00E676',
+      unregisteredMembers: (json['unregistered_members'] as List<dynamic>? ?? [])
+          .map((m) => PreregMember.fromJson(m as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  bool get hasUnregisteredSlots => unregisteredMembers.isNotEmpty;
+}
+

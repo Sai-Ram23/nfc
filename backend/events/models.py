@@ -23,6 +23,37 @@ class Team(models.Model):
         return self.team_name
 
 
+class PreRegisteredMember(models.Model):
+    """
+    A pre-loaded participant slot linked to a team but not yet assigned an NFC UID.
+    Created by admin (via CSV import or mobile app) before the event starts.
+    Once a blank NFC card is tapped and linked at registration, a Participant is
+    created from this slot and is_linked is set to True.
+    """
+    team = models.ForeignKey(
+        Team,
+        on_delete=models.CASCADE,
+        related_name='pre_registered',
+    )
+    name = models.CharField(max_length=200)
+    college = models.CharField(max_length=200)
+    is_linked = models.BooleanField(
+        default=False,
+        help_text="True once an NFC UID has been assigned to this slot."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+        unique_together = [('team', 'name')]  # No duplicate names within the same team
+        verbose_name = "Pre-Registered Member"
+        verbose_name_plural = "Pre-Registered Members"
+
+    def __str__(self):
+        status = "linked" if self.is_linked else "unlinked"
+        return f"{self.name} ({self.team.team_name}) [{status}]"
+
+
 class Participant(models.Model):
     """
     Represents an event participant identified by their NFC tag UID.

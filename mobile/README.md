@@ -1,12 +1,12 @@
 # BREACH GATE — Mobile App (Flutter V3.1)
 
-The Flutter mobile application for the BREACH GATE NFC Event Distribution System. Provides a 5-tab admin interface for NFC scanning, team-aware distribution, real-time dashboards, attendee management, manual distribution, and CSV/XLSX export.
+The Flutter mobile application for the BREACH GATE NFC Event Distribution System. Provides a 6-tab admin interface for NFC scanning, pre-registration mapping, team creation, team-aware distribution, real-time dashboards, attendee management, and CSV/XLSX export.
 
 ---
 
 ## Screens & Navigation
 
-The app uses a `HomeShell` with a 5-tab `NavigationBar` and `IndexedStack` for tab state preservation.
+The app uses a `HomeShell` with a 6-tab `NavigationBar` and `IndexedStack` for tab state preservation.
 
 ### 1. Splash Screen (`splash_screen.dart`)
 - Animated Trojan Horse logo with elastic scale, pulsing green glow, and slide-up "BREACH GATE" text.
@@ -23,29 +23,38 @@ The app uses a `HomeShell` with a 5-tab `NavigationBar` and `IndexedStack` for t
 - **Chronological Matrix**: 6 distribution slots dynamically sorted by state:
   - 🟢 AVAILABLE → 🔒 LOCKED → ✅ COLLECTED → ❌ EXPIRED
 - **Team Context Section**: Per-item progress bars, "View Members" modal, "Distribute to Entire Team" button.
+- **Pre-Registration Flow**: When scanning a blank NFC tag (`unregistered` API response), an organizer flow opens via bottom sheet:
+  - Fetches teams with unassigned pre-registered slots.
+  - Allows organizer to link the tag to a specific team/member, creating a `Participant`.
 - Manual UID entry popup for emulator testing.
 
-### 4. Dashboard Tab (`dashboard_screen.dart`)
+### 4. Teams Tab (`teams_screen.dart`)
+- **Team Management**: Displays a list of all pre-registered teams and their available `PreRegisteredMember` slots.
+- **On-the-fly Creation**: Organizer can physically create a *"New Team"* right from the mobile UI.
+- **Dynamic Slots**: Adds new single `PreRegisteredMember` slots to any existing team if the pre-allocated slots fill up.
+- Bottom sheet driven UX for quick data entry.
+
+### 5. Dashboard Tab (`dashboard_screen.dart`)
 - **Stats Row**: 3 cards showing Participants, Teams, and Solo counts.
 - **Distribution Progress**: 6 rows with emoji icons, progress bars, and `given/total (%)` labels.
 - **Team Leaderboard**: Ranked by completion rate with 🥇🥈🥉 medals and team color dots.
 - Pull-to-refresh support.
 
-### 5. Attendees Tab (`attendees_screen.dart`)
+### 6. Attendees Tab (`attendees_screen.dart`)
 - **Debounced Search**: Filter by name, UID, or team name (400ms debounce).
 - **View Toggle**: Individual list vs Team groups.
 - **Filter Chips**: All / Complete / Missing items.
 - **Attendee Cards**: Avatar with team color, UID badge, collection progress bar.
 - **Expandable Team Groups**: Tap to reveal members with individual collection counts.
 
-### 6. Manual Tab (`manual_screen.dart`)
+### 7. Manual Tab (`manual_screen.dart`)
 - **Dynamic Search**: Debounced search across name, UID, and team name.
 - **Filter Chips**: All / Teams / Solo.
 - **Team Cards**: Expandable with member list, per-item progress, and inline GIVE buttons.
 - **Solo Cards**: Individual participant view with item grid and GIVE buttons.
 - **Export Button**: Opens a bottom sheet to choose CSV or XLSX export format.
 
-### 7. Settings Tab (`settings_screen.dart`)
+### 8. Settings Tab (`settings_screen.dart`)
 - **Server Configuration**: Backend URL input with Save button and visual "Saved!" feedback.
 - **Event Timing**: Date picker for Event Start Date, Day 1/Day 2 slot display.
 - **About**: Trojan Horse logo, BREACH GATE branding, version info.
@@ -61,16 +70,16 @@ lib/
 ├── main.dart                 # BreachGateApp entry, dark theme, Google Fonts
 ├── splash_screen.dart        # Animated Trojan Horse splash
 ├── login_screen.dart         # BREACH GATE branded auth
-├── home_shell.dart           # 5-tab NavigationBar + IndexedStack
-├── scan_screen.dart          # NFC scanning, team context, distribution
+├── home_shell.dart           # 6-tab NavigationBar + IndexedStack
+├── scan_screen.dart          # NFC scanning, registration sheet, distribution
+├── teams_screen.dart         # Manage pre-reg teams, create teams/members
 ├── dashboard_screen.dart     # Stats, progress bars, team leaderboard
 ├── attendees_screen.dart     # Search, filters, individual/team views
 ├── manual_screen.dart        # Participant browser + inline distribute + export
 ├── settings_screen.dart      # Server config, event timing, about
 ├── export_service.dart       # CSV / multi-sheet XLSX + native share sheet
-├── models.dart               # Team, Participant, TeamMember, TeamDetails,
-│                             # TeamDistributionResponse, DashboardStats
-├── api_service.dart          # HTTP client, token persistence, 12+ methods
+├── models.dart               # Team, Participant, PreregTeam, PreregMember
+├── api_service.dart          # HTTP client, token persistence, 16 APIs
 └── utils/
     └── time_manager.dart     # 48-hour event slot calculations
 ```

@@ -14,47 +14,47 @@ A robust NFC-based event management system for **Siege of Troy** at **Malla Redd
 
 ---
 
-## App Flow & Architecture
+## Complete Application Flow
 
-### 1. Splash & Authentication
-- The app launches with an animated **Trojan Horse** splash screen.
-- `SharedPreferences` is checked for a saved auth token.
-  - **Authenticated** → Navigates to the 5-tab Home Shell.
-  - **Unauthenticated** → Navigates to the BREACH GATE Login Screen.
-- Admin inputs credentials → `POST /api/login/` → Token is issued and cached locally.
+The life cycle of the application is broken down into two main phases: **Pre-Event Preparation** and **Event Day Operations**.
 
-### 2. NFC Tag Scanning
-- The **Scan** tab initializes NFC hardware. A pulsing green Trojan Horse icon indicates readiness.
-- When an NFC tag is tapped, the `nfc_manager` plugin reads the hardware UID using platform-specific APIs (`NfcTagAndroid` on Android; `MiFareIos`, `Iso7816Ios`, `Iso15693Ios`, `FeliCaIos` on iOS).
-- The raw byte array is parsed into an **uppercase hexadecimal UID** (e.g., `5337EACC730001`).
-- A `POST /api/scan/` request validates the UID and returns participant + team data.
+### Phase 1: Pre-Event Preparation
+Before the event starts, the organizers use the backend to define the teams and the expected participants.
+1. **Bulk Import:** Organizers upload a CSV containing Team Names, Participant Names, and College details. 
+2. **Backend Processing:** `import_prereg.py` script parses the file, creates `Team` records, and provisions blank `PreRegisteredMember` slots for every member on the list.
+3. *Alternative:* Organizers can also use the mobile app's **Teams Tab** to manually create new teams and append `PreRegisteredMember` slots on the fly if last-minute additions arise.
 
-### 3. Participant & Team Context
-- The participant's **profile card** shows name, college, team badge (color dot + name), team size, and UID.
-- If the participant belongs to a team, a **Team Context Section** appears showing:
-  - Per-item progress bars (`Registration 2/4`, `Lunch 3/4`, etc.)
-  - **"View Members"** modal with each member's collection progress.
-  - **"Distribute to Entire Team"** button for bulk distribution.
+### Phase 2: Event Day Operations
+During the event, blank NFC tags are rapidly assigned and then utilized for atomic distribution tracking.
 
-### 4. Dynamic Time-Based UI (Chronological Matrix)
-The `TimeManager` maps 6 distribution slots against the current clock relative to the **Event Start Date**:
-1. 🟢 **AVAILABLE NOW** — bright green border, pulsing animation, active "Collect" button.
-2. 🔒 **LOCKED** — greyscale, countdown text (`Opens in 14h 22m`).
-3. ✅ **COLLECTED** — muted dark green, stamped with exact collection timestamp.
-4. ❌ **EXPIRED** — strike-through text, reduced opacity.
+#### Step 1: Authentication
+- The app launches. If no token is found, the admin inputs credentials → `POST /api/login/` → Token is issued and cached locally.
 
-### 5. Atomic Distribution
-- Admin taps **"Collect Lunch"** → `POST /api/give-lunch/` with UID.
-- Backend wraps the query in `transaction.atomic()` + `select_for_update()`, preventing race conditions across simultaneous admin devices.
-- Success → green toast + haptic vibration. Duplicate → red toast + error message.
+#### Step 2: Tag Linking (The Registration Desk)
+- A participant arrives and receives a **blank NFC ID card**.
+- The organizer taps the blank card on their phone using the mobile app's **Scan** tab.
+- **Backend Response:** Returns an `unregistered` status.
+- **Mobile Action:** The app detects this and pops open a bottom sheet.
+  - The organizer sees a list of all Teams with empty slots.
+  - The organizer selects the requested Team, selects the Participant's pre-loaded Name, and confirms.
+- **Atomic Linking:** A `POST /api/prereg/register/` call links the physical NFC UID to that pre-recorded slot, finalizing them as a true `Participant` in the system.
 
-### 6. Team Bulk Distribution
-- Admin taps **"Distribute to Entire Team"** → selects an item → `POST /api/distribute-team/`.
-- Backend iterates all team members, skipping those who already collected, and returns a summary.
+#### Step 3: Distribution Tracking (The Food Stalls)
+- Now fully registered, whenever the participant taps their NFC tag at a food stall, the app pulls their **Profile Card** (Name, College, Team).
+- **Chronological Matrix:** The app displays 6 distribution slots.
+  - 🟢 **AVAILABLE NOW** — bright green border, active "Collect" button.
+  - 🔒 **LOCKED** — greyed out (e.g. `Opens in 14h 22m`).
+  - ✅ **COLLECTED** — stamped with collection time.
+  - ❌ **EXPIRED** — strike-through text.
+- **Atomic Distribution:** Tapping "Collect Lunch" sends a POST request. The backend locks the database row using `transaction.atomic()`, preventing double-scans if multiple admins tap the card simultaneously.
 
-### 7. Manual Distribution & Export
-- The **Manual** tab is a full participant browser with debounced search, filter chips (All/Teams/Solo), expandable team cards, and inline GIVE buttons.
-- An **Export** button converts all participant data to CSV or multi-sheet XLSX (Participants, Distribution Status, Team Summary) and opens the native share sheet.
+#### Step 4: Team Bulk Operations (Optional)
+- From the Scan tab, an organizer can hit **"Distribute to Entire Team"**.
+- This sweeps through the participant's team array and bulk-approves an item for all uncollected members at once.
+
+#### Step 5: Oversight & Export (The Admin Dashboard)
+- Organizers monitor real-time completion charts and team leaderboards in the **Dashboard** Tab.
+- At the end of the event, organizers extract the records using the **Export** button in the **Manual** Tab, which generates a comprehensive XLSX audit log of all distribution timestamps to send via native share sheet.
 
 ---
 
@@ -73,6 +73,10 @@ Built on **Django 5.0** + **Django REST Framework (DRF)**.
 |---|---|---|
 | `POST` | `/api/login/` | Auth token generation |
 | `POST` | `/api/scan/` | Validate UID, return participant + team data |
+| `POST` | `/api/prereg/register/` | Link a blank NFC UID to a pre-registered member slot |
+| `GET` | `/api/prereg/teams/` | List all teams with unlinked member slots for registration dropdowns |
+| `POST` | `/api/prereg/teams/create/` | Create a new team on the fly from the mobile app |
+| `POST` | `/api/prereg/teams/<team_id>/add-member/` | Add a single pre-registered member slot to an existing team |
 | `POST` | `/api/give-registration/` | Atomic registration distribution |
 | `POST` | `/api/give-breakfast/` | Atomic breakfast distribution |
 | `POST` | `/api/give-lunch/` | Atomic lunch distribution |
@@ -91,10 +95,11 @@ Built on **Django 5.0** + **Django REST Framework (DRF)**.
 
 Built with **Flutter 3+** using the **Black & Green** aesthetic (`#00E676` primary, `#000000` background).
 
-### 5-Tab Navigation
+### 6-Tab Navigation
 | Tab | Screen | Purpose |
 |---|---|---|
-| **Scan** | `scan_screen.dart` | NFC scanning, participant view, team context, distribution |
+| **Scan** | `scan_screen.dart` | NFC scanning, tag registration, team context, distribution |
+| **Teams** | `teams_screen.dart` | Manage pre-registered teams, create teams on the fly, add member slots |
 | **Dashboard** | `dashboard_screen.dart` | Stats cards, distribution progress bars, team leaderboard |
 | **Attendees** | `attendees_screen.dart` | Searchable list, filter chips, individual/team views |
 | **Manual** | `manual_screen.dart` | Participant browser with search/filter/distribute + CSV/XLSX export |
@@ -106,14 +111,15 @@ lib/
 ├── main.dart                 # BreachGateApp entry point, dark theme
 ├── splash_screen.dart        # Animated Trojan Horse logo splash
 ├── login_screen.dart         # BREACH GATE branded auth screen
-├── home_shell.dart           # 5-tab NavigationBar + IndexedStack
-├── scan_screen.dart          # NFC scanning, team context, distribution
+├── home_shell.dart           # 6-tab NavigationBar + IndexedStack
+├── scan_screen.dart          # NFC scanning, tag registration sheet, team context, distribution
+├── teams_screen.dart         # Bottom-sheet heavy screen for on-the-fly team creation/slot addition
 ├── dashboard_screen.dart     # Stats, progress, team leaderboard
 ├── attendees_screen.dart     # Search, filters, individual/team views
 ├── manual_screen.dart        # Participant browser + inline distribute + export
 ├── settings_screen.dart      # Server config, event timing, about
 ├── export_service.dart       # CSV/XLSX generation + share sheet
-├── models.dart               # Data classes (Team, Participant, etc.)
+├── models.dart               # Data classes (Team, Participant, PreregTeam, etc.)
 ├── api_service.dart          # HTTP client + token persistence
 └── utils/
     └── time_manager.dart     # Dynamic 48-hour event slot calculations
@@ -194,12 +200,12 @@ flutter build apk --release --split-per-abi
 
 ## Testing
 
-### Backend (32 Tests)
+### Backend (48 Tests, 100% Coverage)
 ```bash
 cd backend
 python manage.py test events -v 2
 ```
-Covers: authentication, NFC scan, 6 distribution endpoints, duplicate collision detection, team details, bulk distribution, dashboard stats, team leaderboard, attendee search/filters.
+Covers: authentication, NFC scan, pre-registration linking, on-the-fly team creation, 6 distribution endpoints, duplicate collision detection, team details, bulk distribution, dashboard stats, team leaderboard, attendee search/filters.
 
 ### Frontend
 ```bash

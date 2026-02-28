@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 
-from .models import Team, Participant
+from .models import Team, Participant, PreRegisteredMember
 from .serializers import (
     ParticipantSerializer,
     TeamMemberSerializer,
@@ -16,6 +16,11 @@ from .serializers import (
     DistributeRequestSerializer,
     TeamDistributeRequestSerializer,
     LoginRequestSerializer,
+    PreRegMemberSerializer,
+    PreRegTeamSerializer,
+    RegisterNfcRequestSerializer,
+    CreateTeamSerializer,
+    AddMemberSerializer,
 )
 
 # ---------- Item field mapping ----------
@@ -44,10 +49,11 @@ def scan_uid(request):
     try:
         participant = Participant.objects.select_related('team').get(uid=uid)
     except Participant.DoesNotExist:
-        print(f"\n[!] UNREGISTERED TAG SCANNED. UID: {uid}\n    Copy this UID and add it to the Django Admin panel.\n")
+        # Return 'unregistered' so the app can show the Registration sheet
         return Response({
-            'status': 'invalid',
-            'message': 'No participant found with this NFC tag.',
+            'status': 'unregistered',
+            'uid': uid,
+            'message': 'This NFC tag is not linked to any participant yet.',
         }, status=status.HTTP_404_NOT_FOUND)
 
     return Response({
@@ -419,3 +425,176 @@ def attendees_list(request):
         from .serializers import ParticipantSerializer
         data = ParticipantSerializer(queryset, many=True).data
         return Response({'view': 'individual', 'attendees': data})
+
+
+# ---------- Pre-Registration Endpoints ----------
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def prereg_teams_list(request):
+    """
+    GET /api/prereg/teams/
+    Returns all teams that have at least one unlinked pre-registered member slot.
+    Used by the app to populate the team + member dropdowns at registration time.
+    """
+    teams = Team.objects.prefetch_related('pre_registered').all()
+    result = []
+    for team in teams:
+        unlinked = team.pre_registered.filter(is_linked=False)
+        result.append({
+            'team_id': team.team_id,
+            'team_name': team.team_name,
+            'team_color': team.team_color,
+            'unregistered_members': [
+                {'id': m.id, 'name': m.name, 'college': m.college}
+                for m in unlinked
+            ],
+        })
+    # Include all teams (even those with 0 unlinked slots) so app can show them
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_nfc_tag(request):
+    """
+    POST /api/prereg/register/
+    Links an NFC UID to a pre-registered member slot, creating a Participant.
+    Body: { uid, prereg_member_id }
+    Returns the full participant data on success (same shape as /api/scan/).
+    """
+    serializer = RegisterNfcRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    uid = serializer.validated_data['uid']
+    prereg_member_id = serializer.validated_data['prereg_member_id']
+
+    # Check UID not already in use
+    if Participant.objects.filter(uid=uid).exists():
+        return Response({
+            'status': 'error',
+            'message': f'UID {uid} is already linked to a participant.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        slot = PreRegisteredMember.objects.select_related('team').get(id=prereg_member_id)
+    except PreRegisteredMember.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Pre-registered member slot not found.',
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    if slot.is_linked:
+        return Response({
+            'status': 'error',
+            'message': f'{slot.name} has already been linked to an NFC card.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        participant = Participant.objects.create(
+            uid=uid,
+            name=slot.name,
+            college=slot.college,
+            team=slot.team,
+        )
+        slot.is_linked = True
+        slot.save(update_fields=['is_linked'])
+
+    return Response({
+        'status': 'registered',
+        'uid': participant.uid,
+        'name': participant.name,
+        'college': participant.college,
+        'team_id': participant.team.team_id if participant.team else '',
+        'team_name': participant.team.team_name if participant.team else 'Individual',
+        'team_color': participant.team.team_color if participant.team else '#00E676',
+        'team_size': participant.team_size,
+        'registration_goodies': False,
+        'registration_time': None,
+        'breakfast': False,
+        'breakfast_time': None,
+        'lunch': False,
+        'lunch_time': None,
+        'snacks': False,
+        'snacks_time': None,
+        'dinner': False,
+        'dinner_time': None,
+        'midnight_snacks': False,
+        'midnight_snacks_time': None,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_prereg_team(request):
+    """
+    POST /api/prereg/teams/create/
+    Create a new team on the fly from the mobile app.
+    Body: { team_id, team_name, team_color }
+    """
+    serializer = CreateTeamSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    team_id = serializer.validated_data['team_id']
+    if Team.objects.filter(team_id=team_id).exists():
+        return Response({
+            'status': 'error',
+            'message': f'A team with ID "{team_id}" already exists.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    team = Team.objects.create(
+        team_id=team_id,
+        team_name=serializer.validated_data['team_name'],
+        team_color=serializer.validated_data['team_color'],
+    )
+    return Response({
+        'status': 'created',
+        'team_id': team.team_id,
+        'team_name': team.team_name,
+        'team_color': team.team_color,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_prereg_member(request, team_id):
+    """
+    POST /api/prereg/teams/<team_id>/add-member/
+    Add a single pre-registered member slot to an existing team.
+    Body: { name, college }
+    """
+    try:
+        team = Team.objects.get(team_id=team_id)
+    except Team.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Team not found.',
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = AddMemberSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    name = serializer.validated_data['name']
+    college = serializer.validated_data['college']
+
+    if PreRegisteredMember.objects.filter(team=team, name=name).exists():
+        return Response({
+            'status': 'error',
+            'message': f'"{name}" is already registered in {team.team_name}.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    member = PreRegisteredMember.objects.create(
+        team=team,
+        name=name,
+        college=college,
+    )
+    return Response({
+        'status': 'created',
+        'id': member.id,
+        'name': member.name,
+        'college': member.college,
+        'team_id': team.team_id,
+        'team_name': team.team_name,
+    }, status=status.HTTP_201_CREATED)
+

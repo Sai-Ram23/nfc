@@ -13,10 +13,12 @@ Built on **Django 5.0** + **Django REST Framework (DRF)** with SQLite (developme
 | Model | Fields | Purpose |
 |---|---|---|
 | **Team** | `team_id` (UUID), `name`, `color` (hex) | Group identity with visual color coding |
-| **Participant** | `uid`, `name`, `college`, `team` (FK), 6 distribution booleans + timestamps | Attendee state tracking |
+| **PreRegisteredMember** | `team` (FK), `name`, `college`, `is_linked` | A placeholder slot for a participant before an NFC UID is assigned |
+| **Participant** | `uid`, `name`, `college`, `team` (FK), 6 distribution booleans + timestamps | Attendee state tracking following successful NFC assignment |
 
 - `Team.team_id` is auto-generated (`uuid4`) for API-safe lookups.
-- `Participant.uid` is the physical NFC tag hex identifier (uppercase, unique).
+- `PreRegisteredMember` slots are created in bulk via CSV or created on-the-fly from the mobile app.
+- `Participant.uid` is the physical NFC tag hex identifier (uppercase, unique). Once linked, a `PreRegisteredMember` slot is marked `is_linked=True`.
 - Each distribution slot has a boolean (`lunch`) and a timestamp (`lunch_time`) recording exact collection time.
 
 ### API Endpoints (`events/urls.py` & `events/views.py`)
@@ -24,7 +26,11 @@ Built on **Django 5.0** + **Django REST Framework (DRF)** with SQLite (developme
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
 | `POST` | `/api/login/` | No | Validate credentials, issue DRF Token |
-| `POST` | `/api/scan/` | Token | Look up participant by UID, return full state + team info |
+| `POST` | `/api/scan/` | Token | Look up participant by UID, return full state + team info (or `'unregistered'`) |
+| `GET` | `/api/prereg/teams/` | Token | Sub-list of teams containing unlinked `PreRegisteredMember` slots |
+| `POST` | `/api/prereg/register/` | Token | Atomically link a blank NFC tag to a `PreRegisteredMember`, creating a `Participant` |
+| `POST` | `/api/prereg/teams/create/` | Token | Create a new `Team` on-the-fly from the mobile app |
+| `POST` | `/api/prereg/teams/<team_id>/add-member/` | Token | Add a single `PreRegisteredMember` to an existing team |
 | `POST` | `/api/give-registration/` | Token | Atomic registration goodies distribution |
 | `POST` | `/api/give-breakfast/` | Token | Atomic breakfast distribution |
 | `POST` | `/api/give-lunch/` | Token | Atomic lunch distribution |
@@ -73,8 +79,8 @@ pip install -r requirements.txt
 # 3. Run migrations
 python manage.py migrate
 
-# 4. Seed sample data (admin user + 20 participants + teams)
-python manage.py seed_data --count 20
+# 4. Import teams and members from a CSV (Pre-registration)
+python manage.py import_prereg data.csv
 
 # 5. Start server (bind to 0.0.0.0 for LAN/hotspot access)
 python manage.py runserver 0.0.0.0:8000
@@ -86,7 +92,9 @@ python manage.py runserver 0.0.0.0:8000
 
 ## Testing
 
-**32 automated tests** covering authorization, NFC scan, all 6 distribution endpoints, duplicate collision detection, team CRUD, bulk distribution, dashboard stats, team leaderboard, and attendee search/filtering.
+**48 automated tests** covering authorization, NFC scan, pre-registration flows (linking, team creation), all 6 distribution endpoints, duplicate collision detection, team CRUD, bulk distribution, dashboard stats, team leaderboard, and attendee search/filtering.
+
+**Coverage: 100% across all API views, models, and serializers.**
 
 ```bash
 python manage.py test events -v 2

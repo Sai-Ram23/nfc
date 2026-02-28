@@ -3,6 +3,7 @@ import 'api_service.dart';
 import 'scan_screen.dart';
 import 'dashboard_screen.dart';
 import 'attendees_screen.dart';
+import 'teams_screen.dart';
 import 'manual_screen.dart';
 import 'settings_screen.dart';
 import 'login_screen.dart';
@@ -27,15 +28,17 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _screens = [
-      // Tab 0: Scan (existing screen)
+      // Tab 0: Scan
       ScanScreen(api: widget.api),
       // Tab 1: Dashboard
       DashboardScreen(api: widget.api),
       // Tab 2: Attendees
       AttendeesScreen(api: widget.api),
-      // Tab 3: Manual
+      // Tab 3: Teams (pre-registration management)
+      TeamsScreen(api: widget.api),
+      // Tab 4: Manual
       ManualScreen(api: widget.api),
-      // Tab 4: Settings
+      // Tab 5: Settings
       SettingsScreen(api: widget.api),
     ];
   }
@@ -138,6 +141,11 @@ class _HomeShellState extends State<HomeShell> {
               icon: Icon(Icons.people_outline, color: Color(0xFFB0B0B0)),
               selectedIcon: Icon(Icons.people, color: Color(0xFF00E676)),
               label: 'Attendees',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.group_work_outlined, color: Color(0xFFB0B0B0)),
+              selectedIcon: Icon(Icons.group_work, color: Color(0xFF00E676)),
+              label: 'Teams',
             ),
             NavigationDestination(
               icon: Icon(Icons.edit_note_outlined, color: Color(0xFFB0B0B0)),

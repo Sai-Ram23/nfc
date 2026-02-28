@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Team, Participant
+from .models import Team, Participant, PreRegisteredMember
 
 
 @admin.register(Team)
@@ -39,3 +39,12 @@ class ParticipantAdmin(admin.ModelAdmin):
         return obj.team_name_display
     get_team_name.short_description = 'Team'
     get_team_name.admin_order_field = 'team__team_name'
+
+
+@admin.register(PreRegisteredMember)
+class PreRegisteredMemberAdmin(admin.ModelAdmin):
+    list_display = ['name', 'college', 'team', 'is_linked', 'created_at']
+    list_filter = ['is_linked', 'team']
+    search_fields = ['name', 'college', 'team__team_name']
+    list_per_page = 50
+    raw_id_fields = ['team']
